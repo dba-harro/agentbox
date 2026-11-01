@@ -2,19 +2,24 @@
 
 The sandbox uses a feature overlay system to conditionally include optional tools.
 Each `--with-<name>` flag maps to a sibling directory `<name>/` next to `default/`.
-No overlays are bundled yet; `--with-<name>` for an unknown feature is rejected.
+Bundled overlays: `podman/` (`--with-podman`). `--with-<name>` for an unknown
+feature is rejected.
 
 ## Directory structure
 
 ```
 default/                   # base config — always included, no optional features
 ├── opencode.jsonc         # base config (no feature-specific additions)
-├── prompts/               # general.md, karpathy.md
+├── prompts/               # general.md, karpathy.md, sandbox.md
 ├── skill/                 # tuicr/, herdr/
 ├── command/               # commit.md, docs.md, tuicr.md
 ├── claude/                # statusline.sh (deployed to ~/.claude)
 ├── herdr/                 # config.toml, herdr-launch.sh
 └── tuicr/                 # config.toml
+
+podman/                    # --with-podman (nested rootless podman)
+├── containers/            # containers.conf, storage.conf, policy.json, registries.conf
+└── prompts/               # podman.md
 
 <feature>/                 # optional overlay for --with-<feature>
 ├── opencode.jsonc         # optional — only feature-specific additions
@@ -26,7 +31,8 @@ default/                   # base config — always included, no optional featur
 
 Each feature directory can contain any subset of:
 - `opencode.jsonc` — deep-merged into the base jsonc (objects merge recursively, arrays concatenate, scalars overlay)
-- `prompts/` — `.md` files concatenated into the global `$HOME/.config/opencode/AGENTS.md`
+- `prompts/` — `.md` files concatenated into the global `$HOME/.config/opencode/AGENTS.md`,
+  and appended to the sandbox prompt given to Claude Code and Codex
 - `skill/` — subdirectories bound into `$HOME/.config/opencode/skills/`
 
 The merge script at `merge-jsonc.js` (`merge-jsonc.js <base> [overlay ...] <out>`)

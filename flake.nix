@@ -66,6 +66,7 @@
         gh
         wl-clipboard
         uv
+        podman
         agents.claude-code
         agents.codex
         agents.t3code-desktop
@@ -147,6 +148,7 @@
             export AGENTBOX_VERSION="${self.shortRev or self.dirtyShortRev or "unknown"}"
             export DEFAULT_FEATURES="${defaultFeatures}"
             export OMNIROUTE_PLUGIN_V2="${omniroutePluginV2}"
+            export PODMAN_DIR="${./podman}"
           ''
           + builtins.readFile ./sandbox.sh;
         };

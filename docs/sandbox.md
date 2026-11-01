@@ -36,7 +36,7 @@ Defined in `sandbox.sh`:
 | `--no-net` | Disable network access in the sandbox |
 | `--docker` | Bind the host Docker socket (`/var/run/docker.sock`). Off by default: socket access is root-equivalent on the host, and containers are not restricted by `--no-net` |
 | `--bind-serial-dev` | Bind host `ttyUSB*`/`ttyACM*` serial devices (and `/dev/serial`) into the sandbox; requires membership in the `dialout` group |
-| `--with-NAME` | Enable the optional feature overlay `NAME/` (repeatable; unknown names are rejected). No overlays are bundled yet, see `AGENTS.md` |
+| `--with-NAME` | Enable the optional feature overlay `NAME/` (repeatable; unknown names are rejected). Bundled: `--with-podman` (see [Podman](#podman)); see `AGENTS.md` for adding more |
 | `-w`, `--workspace PATH` | Bind additional workspace directory (repeatable) |
 | `-r`, `--readonly PATH` | Bind additional directory read-only (repeatable) |
 
@@ -64,6 +64,27 @@ Defined in `sandbox.sh`:
 - Workspace binds (`$PWD` and `-w` paths) are applied **before** all sandbox-internal mounts, so running from a parent of the config/state paths (e.g. `~` or `~/.config/opencode`) cannot shadow the prepared environment
 - A workspace that contains a protected system mount root (`/`, `/usr`, `/bin`, `/lib`, `/lib64`, `/sbin`, `/nix`, `/etc`, `/proc`, `/sys`, `/dev`, `/run`) is rejected with an error, since such a bind would shadow the sandbox's system mounts
 - The bundled prompts plus any enabled feature prompts are concatenated into a single global `~/.config/opencode/AGENTS.md` (opencode2 loads instructions from `AGENTS.md`; the config `instructions` field is accepted but not resolved in V2)
+- The sandbox prompt (`default/prompts/sandbox.md` plus generated session details: workspaces, network, SSH, enabled features) and the feature prompts are also given to Claude Code, as the managed memory file `/etc/claude-code/CLAUDE.md` (loaded alongside `~/.claude/CLAUDE.md`), and to Codex, by shadowing `~/.codex/AGENTS.md` read-only with the host file followed by the sandbox prompt. See [Prompts](prompts.md#sandbox-defaultpromptssandboxmd)
+
+## Podman
+
+`--with-podman` enables rootless `podman` inside the sandbox (nested in the bubblewrap user namespace, no host daemon or socket):
+
+```sh
+nix run . -- --with-podman
+```
+
+- Config comes from `podman/containers/` and is mounted read-only at `/etc/containers`; `CONTAINERS_CONF`, `CONTAINERS_STORAGE_CONF` and `CONTAINERS_REGISTRIES_CONF` point at it
+- Images persist in a dedicated host directory, `~/.local/share/agentbox/containers/storage`. The host's own podman store (`~/.local/share/containers`) is not shared, since it uses a different uid mapping
+- `/etc/subuid` and `/etc/subgid` are replaced with empty files, so podman uses a single-uid mapping instead of failing on the setuid `newuidmap` (which cannot work under bubblewrap's `no_new_privs`)
+- `podman/prompts/podman.md` is added to the agent prompts (opencode, Claude Code, Codex) so the agent knows the limits below
+
+Limitations:
+
+- **Single uid**: containers only have `root`. `USER` directives, `su`/`sudo` and `useradd` + `chown` fail; apt needs `-o APT::Sandbox::User=root`. Files owned by other uids in image layers become root-owned (`ignore_chown_errors`)
+- **Host networking only**: there is no `/dev/net/tun` for pasta/slirp4netns, so containers share the sandbox network namespace. `-p` has no effect and custom networks do not work. In return, `--no-net` also cuts the containers off
+- **No cgroups**: the sandbox has no cgroup delegation, so resource limits (`--memory`, `--cpus`, ...) are unavailable
+- The warning `"/" is not a shared mount` is expected and harmless
 
 ## Sandbox Bind Mounts
 
@@ -71,6 +92,7 @@ The sandbox mounts:
 - System: `/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`, `/nix`, `/sys`, `/proc`, `/dev`
 - Network files (conditional): `/etc/resolv.conf`, `/etc/hosts`, `/etc/nsswitch.conf`
 - Docker socket (only with `--docker`): `/var/run/docker.sock`
+- Podman (only with `--with-podman`): `/etc/containers` (read-only), `~/.local/share/agentbox/containers/storage` (read-write); `/etc/subuid` and `/etc/subgid` are replaced with empty files
 - TLS/SSL: `/etc/ssl`, `/etc/pki`, `/etc/ca-certificates`, `/etc/nix`, `/etc/static`
 - Timezone: `/etc/localtime`, `/etc/zoneinfo`, `/etc/timezone`
 - User config: `~/.config/opencode` (per-sandbox writable copy of the host directory; changes are discarded on exit), `~/.config/tuicr` (tmpfs), `~/.config/git`, `~/.config/nix`, `~/.claude` (read-write, exported as `CLAUDE_CONFIG_DIR`), `~/.codex` (read-write), `~/.config/anthropic`

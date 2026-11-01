@@ -357,6 +357,10 @@ persist_state() {
 # shellcheck disable=SC2329 # invoked via trap
 cleanup() {
   persist_state
+  # Empty mount point bwrap created for the Codex AGENTS.md shadow
+  if [ "${CODEX_AGENTS_CREATED:-false}" = true ] && [ -f "$CODEX_AGENTS" ] && [ ! -s "$CODEX_AGENTS" ]; then
+    rm -f "$CODEX_AGENTS"
+  fi
   rm -rf "${CLEANUP_FILES[@]}"
 }
 trap cleanup EXIT
@@ -530,6 +534,13 @@ if [ -n "$COMMANDS_DIR" ] && [ -d "$COMMANDS_DIR" ]; then
   done
 fi
 
+# Subordinate id ranges are exposed by default; --with-podman hides them.
+SUBID_BINDS=(
+  --ro-bind-try /etc/subuid /etc/subuid
+  --ro-bind-try /etc/subgid /etc/subgid
+)
+PODMAN_ARGS=()
+
 # Feature setup (per --with-<name> flags) — appended after default artifacts so features win
 for feature in "${WITH_FEATURES[@]}"; do
   feature_dir=$(feature_dir "$feature")
@@ -541,34 +552,130 @@ for feature in "${WITH_FEATURES[@]}"; do
       RO_BINDS+=(--ro-bind-try "$skill_path" "$OPENCODE_CFG/skills/$(basename "$skill_path")")
     done
   fi
+
+  # Podman: nested rootless podman with a single-uid mapping. The sandbox has
+  # one uid and no_new_privs, so the setuid newuidmap cannot hand out subuid
+  # ranges; hiding /etc/subuid and /etc/subgid makes podman fall back to a
+  # single mapping instead of failing. Config lives in /etc/containers (podman
+  # only looks for policy.json there or in ~/.config/containers) and is pinned
+  # via CONTAINERS_* so nothing else can override it. Image storage is a
+  # dedicated host directory: the host's own podman store uses a different uid
+  # mapping and must not be shared.
+  if [ "$feature" = podman ]; then
+    PODMAN_STORAGE="$HOME/.local/share/agentbox/containers/storage"
+    [ "$DRY_RUN" = true ] || mkdir -p "$PODMAN_STORAGE"
+    PODMAN_CONF_TMPDIR=$(mktemp -d)
+    CLEANUP_FILES+=("$PODMAN_CONF_TMPDIR")
+    cp "$feature_dir/containers"/* "$PODMAN_CONF_TMPDIR/"
+    chmod -R u+w "$PODMAN_CONF_TMPDIR"
+    sed -i -e "s|@GRAPHROOT@|$PODMAN_STORAGE|" -e "s|@RUNROOT@|/tmp/containers-run|" \
+      "$PODMAN_CONF_TMPDIR/storage.conf"
+    SUBID_BINDS=(
+      --ro-bind /dev/null /etc/subuid
+      --ro-bind /dev/null /etc/subgid
+    )
+    PODMAN_ARGS=(
+      --ro-bind "$PODMAN_CONF_TMPDIR" /etc/containers
+      --bind "$PODMAN_STORAGE" "$PODMAN_STORAGE"
+      --setenv CONTAINERS_CONF /etc/containers/containers.conf
+      --setenv CONTAINERS_STORAGE_CONF /etc/containers/storage.conf
+      --setenv CONTAINERS_REGISTRIES_CONF /etc/containers/registries.conf
+    )
+  fi
 done
 
-# AGENTS.md: opencode2 loads instructions from AGENTS.md, not from the
-# `instructions` config field (accepted but not resolved in V2). Concatenate
-# the bundled base prompts with any enabled feature prompts, in order, into a
-# single global AGENTS.md.
+# Per-session sandbox details, appended after the static sandbox prompt so the
+# agent knows what this particular sandbox exposes.
+SESSION_INFO_TMP=$(mktemp)
+CLEANUP_FILES+=("$SESSION_INFO_TMP")
+{
+  printf '## This sandbox session\n\n'
+  printf -- '- Agent harness: %s\n' "$AGENT"
+  printf -- '- Writable workspaces: %s\n' "${WORKSPACES[*]}"
+  [ "${#RO_WORKSPACES_ABS[@]}" -gt 0 ] && printf -- '- Read-only paths: %s\n' "${RO_WORKSPACES_ABS[*]}"
+  if [ "${#NET_ARGS[@]}" -gt 0 ]; then
+    printf -- '- Network: enabled\n'
+  else
+    printf -- '- Network: disabled (--no-net); downloads, git fetch/push and nix fetches fail\n'
+  fi
+  if [ "$MOUNT_SSH" = true ]; then
+    printf -- '- SSH keys: mounted read-only\n'
+  else
+    printf -- '- SSH keys: not available\n'
+  fi
+  # shellcheck disable=SC2016 # literal Markdown backticks
+  [ "$KEEP_SECRETS" = false ] && printf -- '- `secrets`/`secret` directories in workspaces are hidden (empty)\n'
+  [ "$WITH_DOCKER" = true ] && printf -- '- Host Docker socket is available (root-equivalent host access; use with care)\n'
+  [ "$BIND_SERIAL_DEV" = true ] && printf -- '- Host serial devices (ttyUSB*/ttyACM*) are available\n'
+  [ "${#WITH_FEATURES[@]}" -gt 0 ] && printf -- '- Enabled features: %s\n' "${WITH_FEATURES[*]}"
+} > "$SESSION_INFO_TMP"
+
+# Prompt parts: the bundled base prompts, the session details right after the
+# sandbox prompt, then any enabled feature prompts, in order.
 AGENTS_PARTS=()
+SANDBOX_PARTS=()
 if [ -n "$PROMPTS_DIR" ] && [ -d "$PROMPTS_DIR" ]; then
   for prompt_file in "$PROMPTS_DIR"/*.md; do
     [ -f "$prompt_file" ] && AGENTS_PARTS+=("$prompt_file")
+    if [ "$(basename "$prompt_file")" = sandbox.md ]; then
+      AGENTS_PARTS+=("$SESSION_INFO_TMP")
+      SANDBOX_PARTS+=("$prompt_file" "$SESSION_INFO_TMP")
+    fi
   done
 fi
+[ "${#SANDBOX_PARTS[@]}" -gt 0 ] || { AGENTS_PARTS+=("$SESSION_INFO_TMP"); SANDBOX_PARTS+=("$SESSION_INFO_TMP"); }
 for feature in "${WITH_FEATURES[@]}"; do
   feature_dir=$(feature_dir "$feature")
   [ -d "$feature_dir/prompts" ] || continue
   for prompt_file in "$feature_dir/prompts"/*.md; do
-    [ -f "$prompt_file" ] && AGENTS_PARTS+=("$prompt_file")
+    [ -f "$prompt_file" ] && AGENTS_PARTS+=("$prompt_file") && SANDBOX_PARTS+=("$prompt_file")
   done
 done
-if [ "${#AGENTS_PARTS[@]}" -gt 0 ]; then
-  AGENTS_TMP=$(mktemp)
-  CLEANUP_FILES+=("$AGENTS_TMP")
-  : > "$AGENTS_TMP"
-  for prompt_file in "${AGENTS_PARTS[@]}"; do
-    cat "$prompt_file" >> "$AGENTS_TMP"
-    printf '\n' >> "$AGENTS_TMP"
+
+# Concatenate prompt files (separated by blank lines) into a new temp file and
+# print its path.
+concat_prompts() {
+  local out
+  out=$(mktemp)
+  for prompt_file in "$@"; do
+    cat "$prompt_file" >> "$out"
+    printf '\n' >> "$out"
   done
-  RO_BINDS+=(--ro-bind-try "$AGENTS_TMP" "$OPENCODE_CFG/AGENTS.md")
+  printf '%s' "$out"
+}
+
+# opencode2 loads instructions from AGENTS.md, not from the `instructions`
+# config field (accepted but not resolved in V2): it gets all prompts as a
+# single global AGENTS.md.
+AGENTS_TMP=$(concat_prompts "${AGENTS_PARTS[@]}")
+CLEANUP_FILES+=("$AGENTS_TMP")
+RO_BINDS+=(--ro-bind-try "$AGENTS_TMP" "$OPENCODE_CFG/AGENTS.md")
+
+# Claude Code and Codex only get the sandbox and feature prompts, not the
+# opencode behavior prompts, so the user's own instructions stay in charge.
+SANDBOX_PROMPT_TMP=$(concat_prompts "${SANDBOX_PARTS[@]}")
+CLEANUP_FILES+=("$SANDBOX_PROMPT_TMP")
+
+# Claude Code: the managed-policy memory file, loaded in addition to the
+# user's ~/.claude/CLAUDE.md, so no host file is shadowed.
+RO_BINDS+=(--ro-bind "$SANDBOX_PROMPT_TMP" /etc/claude-code/CLAUDE.md)
+
+# Codex has no system-wide instructions file, so ~/.codex/AGENTS.md is
+# shadowed (read-only) by the host file followed by the sandbox prompt. When
+# the host has none, bwrap leaves an empty mount point behind, which is
+# removed again on exit.
+CODEX_AGENTS="$HOME/.codex/AGENTS.md"
+CODEX_AGENTS_CREATED=false
+if [ "$DRY_RUN" != true ] && [ -d "$HOME/.codex" ]; then
+  [ -e "$CODEX_AGENTS" ] || CODEX_AGENTS_CREATED=true
+  CODEX_PROMPT_TMP=$(mktemp)
+  CLEANUP_FILES+=("$CODEX_PROMPT_TMP")
+  if [ -f "$CODEX_AGENTS" ]; then
+    cat "$CODEX_AGENTS" > "$CODEX_PROMPT_TMP"
+    printf '\n' >> "$CODEX_PROMPT_TMP"
+  fi
+  cat "$SANDBOX_PROMPT_TMP" >> "$CODEX_PROMPT_TMP"
+  RO_BINDS+=(--ro-bind "$CODEX_PROMPT_TMP" "$CODEX_AGENTS")
 fi
 
 # opencode.jsonc: the base config and each enabled feature overlay are merged
@@ -702,8 +809,7 @@ BWRAP_ARGS=(
   --ro-bind-try /etc/passwd /etc/passwd
   --ro-bind-try /etc/group /etc/group
   --ro-bind-try /etc/machine-id /etc/machine-id
-  --ro-bind-try /etc/subuid /etc/subuid
-  --ro-bind-try /etc/subgid /etc/subgid
+  "${SUBID_BINDS[@]}"
   "${TZ_BINDS[@]}"
   # home dirs
   --dir "$HOME"
@@ -734,6 +840,7 @@ BWRAP_ARGS=(
   --bind-try "$HOME/.cargo" "$HOME/.cargo"
   --ro-bind-try "$HOME/.local/share/fonts" "$HOME/.local/share/fonts"
   "${SSH_BINDS[@]}"
+  "${PODMAN_ARGS[@]}"
   "${RO_BINDS[@]}"
   "${SECRETS_SHADOW[@]}"
   --ro-bind-try "${HERDR_LAUNCHER:-$SCRIPT_DIR/default/herdr/herdr-launch.sh}" "$HOME/.herdr-launch.sh"

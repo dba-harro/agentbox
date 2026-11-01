@@ -12,7 +12,7 @@ General opencode2 configuration:
 
 `sandbox.sh` merges this file with the `opencode.jsonc` of every enabled `--with-*` feature via `merge-jsonc.js` (comments and trailing commas allowed) and mounts the result, as plain JSON, at `~/.config/opencode/opencode.jsonc`.
 
-Instructions are no longer listed in `opencode.jsonc`. opencode2 loads them from `AGENTS.md`, which `sandbox.sh` generates by concatenating the bundled prompt files (`general.md`, `karpathy.md`).
+Instructions are no longer listed in `opencode.jsonc`. opencode2 loads them from `AGENTS.md`, which `sandbox.sh` generates by concatenating the bundled prompt files (`general.md`, `karpathy.md`, `sandbox.md`).
 
 ### OmniRoute plugin configuration
 
