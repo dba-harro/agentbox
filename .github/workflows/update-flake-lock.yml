@@ -1,0 +1,58 @@
+name: Update Flake Lock
+# requirements:
+# - Settings : Actions : General : Read and write permissions
+# - Settings : Actions : General : Allow GitHub Actions to create and approve pull requests
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  update-flake-lock:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+        with:
+          # Use the flake's nixConfig (cache.numtide.com substituter).
+          extra-conf: |
+            accept-flake-config = true
+
+      - name: Update flake.lock
+        id: update
+        uses: DeterminateSystems/update-flake-lock@v28
+        with:
+          pr-title: "flake.lock: daily update"
+          pr-body: |
+            Automated update of `flake.lock`.
+
+            Run `nix flake update` and `nix run` to test.
+          pr-labels: "nix,flake-lock,automated"
+
+      # PRs opened with GITHUB_TOKEN do not trigger other workflows, so the
+      # updated lock is built here, in the same job, before merging.
+      - name: Check out the updated lock
+        if: steps.update.outputs.pull-request-number != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.update.outputs.pull-request-head-sha }}
+
+      - name: Build
+        if: steps.update.outputs.pull-request-number != ''
+        run: |
+          nix flake check --print-build-logs
+          nix build --print-build-logs .#default .#omniroute-plugin-v2
+
+      - name: Merge PR
+        if: steps.update.outputs.pull-request-number != ''
+        run: |
+          gh pr merge --admin --merge ${{ steps.update.outputs.pull-request-number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
