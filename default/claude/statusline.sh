@@ -39,7 +39,7 @@ if [ -n "$five" ]; then
   [ -n "$fr" ] && out+=" ${dim}↺${fr}${reset}"
 fi
 if [ -n "$week" ]; then
-  fr=$(fmt_reset "$week_reset" %a)
+  fr=$(fmt_reset "$week_reset" "%a %H:%M")
   out+=" ${dim}│${reset} 7d $(pct_color "$week")$(printf '%.0f%%' "$week")${reset}"
   [ -n "$fr" ] && out+=" ${dim}↺${fr}${reset}"
 fi
