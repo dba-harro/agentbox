@@ -260,6 +260,10 @@ if [ "$DRY_RUN" != true ]; then
   mkdir -p "$HOME/.local/share/opencode"
   mkdir -p "$HOME/.local/state/opencode"
   mkdir -p "$HOME/.cache/opencode"
+  # Multica CLI config + auth token (~/.multica/config.json). Created on the
+  # host so `multica login` inside the sandbox persists across restarts.
+  mkdir -p "$HOME/.multica"
+  chmod 700 "$HOME/.multica"
 fi
 
 # Claude Code resolves its config dir from CLAUDE_CONFIG_DIR, falling back to
@@ -940,6 +944,7 @@ BWRAP_ARGS=(
   --bind-try "$HOME/.opencode" "$HOME/.opencode"
   --bind-try "$HOME/.claude" "$HOME/.claude"
   --bind-try "$HOME/.codex" "$HOME/.codex"
+  --bind-try "$HOME/.multica" "$HOME/.multica"
   --bind-try "$HOME/.config/anthropic" "$HOME/.config/anthropic"
   --tmpfs "$HOME/.config/tuicr"
   --ro-bind-try "${TUICR_CONFIG:-$SCRIPT_DIR/default/tuicr/config.toml}" "$HOME/.config/tuicr/config.toml"

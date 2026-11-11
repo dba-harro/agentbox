@@ -86,7 +86,7 @@ Code review TUI settings:
 File: `flake.nix`
 
 Flake outputs:
-- `devShells.default` -- shell with all dependencies (bash, bubblewrap, bun, opencode2 (logo blanked), tuicr, herdr, jq, git, gitui, curl, gh, wl-clipboard, uv, claude-code, codex, t3code-desktop, python3 with pyyaml)
+- `devShells.default` -- shell with all dependencies (bash, bubblewrap, bun, opencode2 (logo blanked), tuicr, herdr, jq, git, gitui, curl, gh, wl-clipboard, uv, claude-code, codex, multica, python3 with pyyaml)
 - `apps.default` -- run the `sandbox` script
 - `packages.default` -- the built sandbox wrapper
 - `packages.omniroute-plugin-v2` -- the built OmniRoute opencode v2 plugin
@@ -94,7 +94,7 @@ Flake outputs:
 
 Flake inputs:
 - `nixpkgs` (nixpkgs-unstable)
-- `llm-agents.nix` (provides opencode2, tuicr, herdr, claude-code, codex, t3code-desktop packages)
+- `llm-agents.nix` (provides opencode2, tuicr, herdr, claude-code, codex, multica packages)
 - `omniroute-src` (pinned `diegosouzapw/OmniRoute` checkout, source for the v2 plugin)
 
 Extra substituter: `https://cache.numtide.com`

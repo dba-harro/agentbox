@@ -70,6 +70,7 @@
         podman
         agents.claude-code
         agents.codex
+        agents.multica
         (python3.withPackages (ps: [ ps.pyyaml ]))
       ];
 

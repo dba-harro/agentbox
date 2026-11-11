@@ -53,6 +53,7 @@ Defined in `sandbox.sh`:
 - Claude Code state persists in the host `~/.claude` directory, mounted read-write and exported as `CLAUDE_CONFIG_DIR`: settings, credentials (`~/.claude/.credentials.json`), global config/trust/MCP state (`~/.claude/.claude.json`, imported once from a pre-existing host `~/.claude.json`) and session transcripts all survive restarts
 - Deploys the bundled Claude Code status line (`default/claude/statusline.sh`) to `~/.claude/statusline.sh` and adds a `statusLine` entry to `~/.claude/settings.json` on every start. It is idempotent, backs up the settings file before changing it, and leaves a `statusLine` owned by another command untouched
 - Codex state persists in the host `~/.codex` directory, mounted read-write: auth, config and session history survive restarts
+- The Multica CLI (`multica`, from llm-agents.nix) keeps its config and auth token in the host `~/.multica` directory (created with mode `700` if missing), mounted read-write, so `multica login` only has to be run once
 - Default command is `herdr-launch.sh` which starts a Herdr session and auto-launches the `--agent` TUI (opencode2 by default)
 - If arguments are provided, they are passed directly as the sandbox command instead
 - Network binds (`resolv.conf`, `hosts`, `nsswitch.conf`) are conditional on `--no-net`; the Docker socket is only bound with `--docker`
@@ -129,7 +130,7 @@ The sandbox mounts:
 - Podman (only with `--with-podman`): `/etc/containers` (read-only), `~/.local/share/agentbox/containers/storage` (read-write); `/etc/subuid` and `/etc/subgid` are replaced with empty files
 - TLS/SSL: `/etc/ssl`, `/etc/pki`, `/etc/ca-certificates`, `/etc/nix`, `/etc/static`
 - Timezone: `/etc/localtime`, `/etc/zoneinfo`, `/etc/timezone`
-- User config: `~/.config/opencode` (per-sandbox writable copy of the host directory; changes are discarded on exit), `~/.config/tuicr` (tmpfs), `~/.config/git`, `~/.config/nix`, `~/.claude` (read-write, exported as `CLAUDE_CONFIG_DIR`), `~/.codex` (read-write), `~/.config/anthropic`
+- User config: `~/.config/opencode` (per-sandbox writable copy of the host directory; changes are discarded on exit), `~/.config/tuicr` (tmpfs), `~/.config/git`, `~/.config/nix`, `~/.claude` (read-write, exported as `CLAUDE_CONFIG_DIR`), `~/.codex` (read-write), `~/.multica` (read-write), `~/.config/anthropic`
 - User data: `~/.cache/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode`
 - Herdr: isolated temp config and state directories
 

@@ -14,7 +14,7 @@ Sandboxed environment for AI coding agent harnesses -- opencode2, Claude Code an
 ## Features
 
 - **Bubblewrap sandbox** (`sandbox.sh`) -- Isolates the agent harnesses from the host filesystem to reduce secret exposure risk
-- **Multiple harnesses** -- opencode2 (default, auto-launched), Claude Code and Codex are all available (plus the T3 Code desktop app, `t3code-desktop`) inside the sandbox, with their state persisted in `~/.local/share/opencode` + `~/.local/state/opencode`, `~/.claude` and `~/.codex`
+- **Multiple harnesses** -- opencode2 (default, auto-launched), Claude Code and Codex are all available inside the sandbox, with their state persisted in `~/.local/share/opencode` + `~/.local/state/opencode`, `~/.claude` and `~/.codex`; the Multica CLI (`multica`) is included too, with its auth token persisted in `~/.multica`
 - **Herdr terminal workspace** -- Agent-native session that auto-launches the selected agent TUI (opencode2 by default)
 - **OmniRoute plugin** -- Official opencode v2 plugin (`@omniroute/opencode-plugin-v2`), built from a pinned source checkout and opt-in via a host `~/.config/opencode/omniroute.json`
 - **Podman** (`--with-podman`) -- Nested rootless podman inside the sandbox (single uid, host networking, persistent image storage), see [Sandbox](docs/sandbox.md#podman)
