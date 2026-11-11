@@ -11,6 +11,7 @@ EXTRA_WORKSPACES=()
 RO_WORKSPACES=()
 MOUNT_SSH=true
 GIT_CREDS=true
+OPEN_URL=true
 KEEP_SECRETS=true
 BIND_SERIAL_DEV=false
 WITH_DOCKER=false
@@ -55,6 +56,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-git-creds)
       GIT_CREDS=false
+      shift
+      ;;
+    --no-open-url)
+      OPEN_URL=false
       shift
       ;;
     --docker)
@@ -127,6 +132,7 @@ Options:
   --no-ssh-keys             Do not mount ~/.ssh in the sandbox (mounted read-only by default)
   --hide-secrets            Hide 'secrets'/'secret' directories (they are visible by default)
   --no-git-creds            Do not proxy git HTTPS credentials (Azure DevOps) from the host
+  --no-open-url             Do not forward xdg-open/\$BROWSER URLs to the host browser
   --no-net                  Disable network access in the sandbox
   --bind-serial-dev         Bind host ttyUSB* and ttyACM* serial devices into the sandbox
   --docker                  Bind the host Docker socket (grants root-equivalent host access)
@@ -367,8 +373,8 @@ cleanup() {
   if [ "${CODEX_AGENTS_CREATED:-false}" = true ] && [ -f "$CODEX_AGENTS" ] && [ ! -s "$CODEX_AGENTS" ]; then
     rm -f "$CODEX_AGENTS"
   fi
-  if [ -n "${GIT_CRED_PID:-}" ]; then
-    kill "$GIT_CRED_PID" 2>/dev/null || true
+  if [ "${#HOST_PROXY_PIDS[@]}" -gt 0 ]; then
+    kill "${HOST_PROXY_PIDS[@]}" 2>/dev/null || true
   fi
   rm -rf "${CLEANUP_FILES[@]}"
 }
@@ -593,65 +599,92 @@ for feature in "${WITH_FEATURES[@]}"; do
   fi
 done
 
-# Git HTTPS credential proxy: a host-side socat listener answers git
-# credential requests from the sandbox with the host's own helper (e.g. Git
-# Credential Manager backed by the GNOME keyring and an Entra browser login),
-# restricted to AGENTBOX_GIT_CRED_HOSTS. The keyring / D-Bus session bus stay
-# outside the sandbox; only short-lived tokens for allowed hosts cross over.
+# Host proxies: a host-side socat listener per proxy runs default/<name>/
+# server.sh (outside the sandbox) for each connection on a unix socket that is
+# bound into the sandbox, next to the matching client.sh.
+HOST_PROXY_PIDS=()
+HOST_PROXY_SANDBOX_DIR=/run/agentbox
+# start_host_proxy NAME DIR TIMEOUT
+# Sets HOST_PROXY_TMPDIR (holding client.sh) and HOST_PROXY_SOCK; returns 1
+# (after a warning) if the proxy cannot be started. Dry runs only prepare files.
+start_host_proxy() {
+  local name=$1 dir=$2 timeout=$3 log
+  if ! command -v socat >/dev/null 2>&1; then
+    echo "warning: socat not found; $name proxy disabled" >&2
+    return 1
+  fi
+  if [ ! -f "$dir/server.sh" ] || [ ! -f "$dir/client.sh" ]; then
+    echo "warning: $dir is incomplete; $name proxy disabled" >&2
+    return 1
+  fi
+  HOST_PROXY_TMPDIR=$(mktemp -d)
+  CLEANUP_FILES+=("$HOST_PROXY_TMPDIR")
+  HOST_PROXY_SOCK="$HOST_PROXY_TMPDIR/$name.sock"
+  # Copied so the socat EXEC string never contains spaces from SCRIPT_DIR.
+  cp "$dir/server.sh" "$HOST_PROXY_TMPDIR/server.sh"
+  cp "$dir/client.sh" "$HOST_PROXY_TMPDIR/client.sh"
+  [ "$DRY_RUN" = true ] && return 0
+  log="${XDG_STATE_HOME:-$HOME/.local/state}/agentbox/$name.log"
+  mkdir -p "$(dirname "$log")"
+  # shellcheck disable=SC2094 # log path is only passed through as an env var
+  # setsid: no controlling terminal, so nothing can prompt on the TUI's tty.
+  AGENTBOX_PROXY_LOG="$log" setsid socat -t "$timeout" \
+    "UNIX-LISTEN:$HOST_PROXY_SOCK,fork,mode=600" \
+    "EXEC:bash $HOST_PROXY_TMPDIR/server.sh" \
+    </dev/null 2>>"$log" &
+  HOST_PROXY_PIDS+=("$!")
+  for _ in $(seq 50); do
+    [ -S "$HOST_PROXY_SOCK" ] && return 0
+    sleep 0.1
+  done
+  echo "warning: $name proxy did not start (see $log)" >&2
+  return 1
+}
+
+# Git HTTPS credential proxy: answers git credential requests from the sandbox
+# with the host's own helper (e.g. Git Credential Manager backed by the GNOME
+# keyring and an Entra browser login), restricted to AGENTBOX_GIT_CRED_HOSTS.
+# The keyring / D-Bus session bus stay outside the sandbox; only short-lived
+# tokens for allowed hosts cross over.
 GIT_CRED_ARGS=()
 GIT_CRED_DIR="${GIT_CRED_DIR:-$SCRIPT_DIR/default/git-cred}"
-GIT_CRED_SANDBOX_DIR=/run/agentbox
-if [ "$GIT_CREDS" = true ] && [ "${#NET_ARGS[@]}" -gt 0 ]; then
-  if ! command -v socat >/dev/null 2>&1; then
-    echo "warning: socat not found; git HTTPS credential proxy disabled" >&2
-    GIT_CREDS=false
-  elif [ ! -f "$GIT_CRED_DIR/server.sh" ] || [ ! -f "$GIT_CRED_DIR/client.sh" ]; then
-    echo "warning: $GIT_CRED_DIR is incomplete; git HTTPS credential proxy disabled" >&2
-    GIT_CREDS=false
-  else
-    GIT_CRED_TMPDIR=$(mktemp -d)
-    CLEANUP_FILES+=("$GIT_CRED_TMPDIR")
-    GIT_CRED_SOCK="$GIT_CRED_TMPDIR/git-cred.sock"
-    # Copied so the socat EXEC string never contains spaces from SCRIPT_DIR.
-    cp "$GIT_CRED_DIR/server.sh" "$GIT_CRED_TMPDIR/server.sh"
-    cp "$GIT_CRED_DIR/client.sh" "$GIT_CRED_TMPDIR/client.sh"
-    if [ "$DRY_RUN" != true ]; then
-      git_cred_log="${XDG_STATE_HOME:-$HOME/.local/state}/agentbox/git-cred.log"
-      mkdir -p "$(dirname "$git_cred_log")"
-      # shellcheck disable=SC2094 # log path is only passed through as an env var
-      # setsid: no controlling terminal, so nothing can prompt on the TUI's tty.
-      AGENTBOX_GIT_CRED_LOG="$git_cred_log" setsid socat -t 300 \
-        "UNIX-LISTEN:$GIT_CRED_SOCK,fork,mode=600" \
-        "EXEC:bash $GIT_CRED_TMPDIR/server.sh" \
-        </dev/null 2>>"$git_cred_log" &
-      GIT_CRED_PID=$!
-      for _ in $(seq 50); do
-        [ -S "$GIT_CRED_SOCK" ] && break
-        sleep 0.1
-      done
-      if [ ! -S "$GIT_CRED_SOCK" ]; then
-        echo "warning: git credential proxy did not start (see $git_cred_log)" >&2
-        GIT_CREDS=false
-      fi
-    fi
-    if [ "$GIT_CREDS" = true ]; then
-      # Bind the socket only when it exists; dry runs show it as a try-bind.
-      GIT_CRED_ARGS=(
-        --bind-try "$GIT_CRED_SOCK" "$GIT_CRED_SANDBOX_DIR/git-cred.sock"
-        --ro-bind "$GIT_CRED_TMPDIR/client.sh" "$GIT_CRED_SANDBOX_DIR/git-cred-client"
-        --setenv AGENTBOX_GIT_CRED_SOCK "$GIT_CRED_SANDBOX_DIR/git-cred.sock"
-        # Highest-precedence git config: clear inherited helpers (e.g. GCM,
-        # which cannot reach the keyring in here), then use the proxy client.
-        --setenv GIT_CONFIG_COUNT 2
-        --setenv GIT_CONFIG_KEY_0 credential.helper
-        --setenv GIT_CONFIG_VALUE_0 ""
-        --setenv GIT_CONFIG_KEY_1 credential.helper
-        --setenv GIT_CONFIG_VALUE_1 "!sh $GIT_CRED_SANDBOX_DIR/git-cred-client"
-      )
-    fi
-  fi
+if [ "$GIT_CREDS" = true ] && [ "${#NET_ARGS[@]}" -gt 0 ] &&
+  start_host_proxy git-cred "$GIT_CRED_DIR" 300; then
+  # Bind the socket only when it exists; dry runs show it as a try-bind.
+  GIT_CRED_ARGS=(
+    --bind-try "$HOST_PROXY_SOCK" "$HOST_PROXY_SANDBOX_DIR/git-cred.sock"
+    --ro-bind "$HOST_PROXY_TMPDIR/client.sh" "$HOST_PROXY_SANDBOX_DIR/git-cred-client"
+    --setenv AGENTBOX_GIT_CRED_SOCK "$HOST_PROXY_SANDBOX_DIR/git-cred.sock"
+    # Highest-precedence git config: clear inherited helpers (e.g. GCM,
+    # which cannot reach the keyring in here), then use the proxy client.
+    --setenv GIT_CONFIG_COUNT 2
+    --setenv GIT_CONFIG_KEY_0 credential.helper
+    --setenv GIT_CONFIG_VALUE_0 ""
+    --setenv GIT_CONFIG_KEY_1 credential.helper
+    --setenv GIT_CONFIG_VALUE_1 "!sh $HOST_PROXY_SANDBOX_DIR/git-cred-client"
+  )
 else
   GIT_CREDS=false
+fi
+
+# Open-URL proxy: xdg-open / $BROWSER inside the sandbox forward http(s) URLs
+# to the host's default browser (e.g. for MCP OAuth logins; the localhost
+# callback works through the shared network namespace). Disabled with
+# --no-net, where it would be the only channel out of the sandbox.
+OPEN_URL_ARGS=()
+OPEN_URL_DIR="${OPEN_URL_DIR:-$SCRIPT_DIR/default/open-url}"
+if [ "$OPEN_URL" = true ] && [ "${#NET_ARGS[@]}" -gt 0 ] &&
+  start_host_proxy open-url "$OPEN_URL_DIR" 10; then
+  chmod 755 "$HOST_PROXY_TMPDIR/client.sh"
+  OPEN_URL_ARGS=(
+    --bind-try "$HOST_PROXY_SOCK" "$HOST_PROXY_SANDBOX_DIR/open-url.sock"
+    --ro-bind "$HOST_PROXY_TMPDIR/client.sh" "$HOST_PROXY_SANDBOX_DIR/bin/xdg-open"
+    --setenv AGENTBOX_OPEN_URL_SOCK "$HOST_PROXY_SANDBOX_DIR/open-url.sock"
+    --setenv BROWSER "$HOST_PROXY_SANDBOX_DIR/bin/xdg-open"
+    --setenv PATH "$HOST_PROXY_SANDBOX_DIR/bin:$PATH"
+  )
+else
+  OPEN_URL=false
 fi
 
 # Per-session sandbox details, appended after the static sandbox prompt so the
@@ -675,6 +708,10 @@ CLEANUP_FILES+=("$SESSION_INFO_TMP")
   fi
   if [ "$GIT_CREDS" = true ]; then
     printf -- '- Git HTTPS: credentials for %s are proxied from the host helper (no keyring/D-Bus in here)\n' "${AGENTBOX_GIT_CRED_HOSTS:-dev.azure.com *.visualstudio.com}"
+  fi
+  if [ "$OPEN_URL" = true ]; then
+    # shellcheck disable=SC2016 # literal Markdown backticks
+    printf -- '- Browser: `xdg-open`/`$BROWSER` open http(s) URLs in the host browser (e.g. for MCP OAuth logins)\n'
   fi
   # shellcheck disable=SC2016 # literal Markdown backticks
   [ "$KEEP_SECRETS" = false ] && printf -- '- `secrets`/`secret` directories in workspaces are hidden (empty)\n'
@@ -914,6 +951,7 @@ BWRAP_ARGS=(
   --ro-bind-try "$HOME/.local/share/fonts" "$HOME/.local/share/fonts"
   "${SSH_BINDS[@]}"
   "${GIT_CRED_ARGS[@]}"
+  "${OPEN_URL_ARGS[@]}"
   "${PODMAN_ARGS[@]}"
   "${RO_BINDS[@]}"
   "${SECRETS_SHADOW[@]}"

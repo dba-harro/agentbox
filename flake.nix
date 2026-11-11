@@ -150,6 +150,7 @@
             export OMNIROUTE_PLUGIN_V2="${omniroutePluginV2}"
             export PODMAN_DIR="${./podman}"
             export GIT_CRED_DIR="${./default/git-cred}"
+            export OPEN_URL_DIR="${./default/open-url}"
           ''
           + builtins.readFile ./sandbox.sh;
         };

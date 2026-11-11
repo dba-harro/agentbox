@@ -16,7 +16,7 @@
 set -u
 
 allowed_hosts=${AGENTBOX_GIT_CRED_HOSTS:-"dev.azure.com *.visualstudio.com"}
-log_file=${AGENTBOX_GIT_CRED_LOG:-/dev/null}
+log_file=${AGENTBOX_PROXY_LOG:-/dev/null}
 
 log() {
   printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$log_file" 2>/dev/null || true

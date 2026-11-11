@@ -34,6 +34,7 @@ Defined in `sandbox.sh`:
 | `--no-ssh-keys` | Do not mount `~/.ssh` in the sandbox (mounted read-only by default) |
 | `--hide-secrets` | Hide `secrets`/`secret` directories in workspaces (they are visible by default) |
 | `--no-git-creds` | Do not proxy git HTTPS credentials from the host (see [Git HTTPS credentials](#git-https-credentials)) |
+| `--no-open-url` | Do not forward `xdg-open`/`$BROWSER` URLs to the host browser (see [Opening URLs in the host browser](#opening-urls-in-the-host-browser)) |
 | `--no-net` | Disable network access in the sandbox |
 | `--docker` | Bind the host Docker socket (`/var/run/docker.sock`). Off by default: socket access is root-equivalent on the host, and containers are not restricted by `--no-net` |
 | `--bind-serial-dev` | Bind host `ttyUSB*`/`ttyACM*` serial devices (and `/dev/serial`) into the sandbox; requires membership in the `dialout` group |
@@ -83,6 +84,21 @@ sandbox: git -> /run/agentbox/git-cred-client -> unix socket -> host: socat -> d
 - If the host token has expired, GCM opens the Entra login in the host browser, as it does outside the sandbox. Terminal prompts are disabled (`GIT_TERMINAL_PROMPT=0`, and the listener has no controlling terminal)
 - Requests are logged without secrets to `${XDG_STATE_HOME:-~/.local/state}/agentbox/git-cred.log`
 - Trade-off: while the sandbox runs, the agent can fetch and push to every repo the logged-in account can access on the allowed hosts
+
+## Opening URLs in the host browser
+
+Tools inside the sandbox often open a browser, e.g. for an MCP server's OAuth login (Claude Code `/mcp`, opencode, Codex). There's no browser in the sandbox, so `sandbox.sh` uses the same host-proxy mechanism as the git credentials (unless `--no-open-url` or `--no-net` is given):
+
+```
+sandbox: tool -> xdg-open / $BROWSER (/run/agentbox/bin/xdg-open) -> unix socket -> host: socat -> default/open-url/server.sh -> xdg-open "$url"
+```
+
+- `/run/agentbox/bin` is put first on `PATH`, so `xdg-open` is the proxy client. `BROWSER` points to it as well
+- The OAuth redirect to `http://localhost:<port>/callback` works without extra setup: the sandbox shares the host network namespace, so the host browser reaches the callback listener inside the sandbox
+- Only `http://` and `https://` URLs are opened (at most 8 KiB, no whitespace or control characters). `file://` and custom schemes (`vscode://`, `ms-teams://`, ...) are rejected, because they would launch host applications with arguments from the sandbox
+- The host opens the URL with its own `xdg-open` (or `$BROWSER` if `xdg-open` is missing). If forwarding fails, the client prints the URL so it can be opened by hand
+- Requests are logged to `${XDG_STATE_HOME:-~/.local/state}/agentbox/open-url.log` with the host part only. Full URLs are not logged, because OAuth URLs carry `state`/PKCE values
+- Trade-off: the agent can open any http(s) page in the logged-in host browser, i.e. issue GET requests with your cookies. With `--no-net` the proxy is disabled, because it would otherwise be a way to send data out of an offline sandbox
 
 ## Podman
 
