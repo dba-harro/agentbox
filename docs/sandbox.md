@@ -33,6 +33,7 @@ Defined in `sandbox.sh`:
 | `--version` | Print the agentbox version (git revision of the flake) and exit |
 | `--no-ssh-keys` | Do not mount `~/.ssh` in the sandbox (mounted read-only by default) |
 | `--hide-secrets` | Hide `secrets`/`secret` directories in workspaces (they are visible by default) |
+| `--no-git-creds` | Do not proxy git HTTPS credentials from the host (see [Git HTTPS credentials](#git-https-credentials)) |
 | `--no-net` | Disable network access in the sandbox |
 | `--docker` | Bind the host Docker socket (`/var/run/docker.sock`). Off by default: socket access is root-equivalent on the host, and containers are not restricted by `--no-net` |
 | `--bind-serial-dev` | Bind host `ttyUSB*`/`ttyACM*` serial devices (and `/dev/serial`) into the sandbox; requires membership in the `dialout` group |
@@ -65,6 +66,23 @@ Defined in `sandbox.sh`:
 - A workspace that contains a protected system mount root (`/`, `/usr`, `/bin`, `/lib`, `/lib64`, `/sbin`, `/nix`, `/etc`, `/proc`, `/sys`, `/dev`, `/run`) is rejected with an error, since such a bind would shadow the sandbox's system mounts
 - The bundled prompts plus any enabled feature prompts are concatenated into a single global `~/.config/opencode/AGENTS.md` (opencode2 loads instructions from `AGENTS.md`; the config `instructions` field is accepted but not resolved in V2)
 - The sandbox prompt (`default/prompts/sandbox.md` plus generated session details: workspaces, network, SSH, enabled features) and the feature prompts are also given to Claude Code, as the managed memory file `/etc/claude-code/CLAUDE.md` (loaded alongside `~/.claude/CLAUDE.md`), and to Codex, by shadowing `~/.codex/AGENTS.md` read-only with the host file followed by the sandbox prompt. See [Prompts](prompts.md#sandbox-defaultpromptssandboxmd)
+
+## Git HTTPS credentials
+
+Git over HTTPS to Azure DevOps uses the host's credential helper, e.g. Git Credential Manager (GCM) with the GNOME keyring (`secretservice`) and an Entra ID browser login. GCM can't run inside the sandbox: `/run` is a private tmpfs, so the D-Bus session bus and the keyring aren't there. Mounting the bus is deliberately avoided, because the sandbox could then read every secret in the keyring.
+
+Instead, `sandbox.sh` starts a small proxy on the host (unless `--no-git-creds` or `--no-net` is given):
+
+```
+sandbox: git -> /run/agentbox/git-cred-client -> unix socket -> host: socat -> default/git-cred/server.sh -> git credential fill (GCM -> keyring / Edge login)
+```
+
+- Inside the sandbox, `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` clear the inherited `credential.helper` list and set the proxy client as the only helper. The host git config files are not touched
+- The server only answers `https` requests for hosts in `AGENTBOX_GIT_CRED_HOSTS`, a space-separated list of globs (default: `dev.azure.com *.visualstudio.com`). Anything else gets an empty reply
+- Only `username`, `password` and `password_expiry_utc` are passed back. Refresh tokens and the keyring stay on the host. `erase` is forwarded (`git credential reject`), and `store` is ignored
+- If the host token has expired, GCM opens the Entra login in the host browser, as it does outside the sandbox. Terminal prompts are disabled (`GIT_TERMINAL_PROMPT=0`, and the listener has no controlling terminal)
+- Requests are logged without secrets to `${XDG_STATE_HOME:-~/.local/state}/agentbox/git-cred.log`
+- Trade-off: while the sandbox runs, the agent can fetch and push to every repo the logged-in account can access on the allowed hosts
 
 ## Podman
 

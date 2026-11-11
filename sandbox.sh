@@ -10,6 +10,7 @@ WITH_FEATURES=()
 EXTRA_WORKSPACES=()
 RO_WORKSPACES=()
 MOUNT_SSH=true
+GIT_CREDS=true
 KEEP_SECRETS=true
 BIND_SERIAL_DEV=false
 WITH_DOCKER=false
@@ -50,6 +51,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --hide-secrets)
       KEEP_SECRETS=false
+      shift
+      ;;
+    --no-git-creds)
+      GIT_CREDS=false
       shift
       ;;
     --docker)
@@ -121,6 +126,7 @@ Options:
   --verbose, -v             Print the full bwrap command before execution
   --no-ssh-keys             Do not mount ~/.ssh in the sandbox (mounted read-only by default)
   --hide-secrets            Hide 'secrets'/'secret' directories (they are visible by default)
+  --no-git-creds            Do not proxy git HTTPS credentials (Azure DevOps) from the host
   --no-net                  Disable network access in the sandbox
   --bind-serial-dev         Bind host ttyUSB* and ttyACM* serial devices into the sandbox
   --docker                  Bind the host Docker socket (grants root-equivalent host access)
@@ -361,6 +367,9 @@ cleanup() {
   if [ "${CODEX_AGENTS_CREATED:-false}" = true ] && [ -f "$CODEX_AGENTS" ] && [ ! -s "$CODEX_AGENTS" ]; then
     rm -f "$CODEX_AGENTS"
   fi
+  if [ -n "${GIT_CRED_PID:-}" ]; then
+    kill "$GIT_CRED_PID" 2>/dev/null || true
+  fi
   rm -rf "${CLEANUP_FILES[@]}"
 }
 trap cleanup EXIT
@@ -584,6 +593,67 @@ for feature in "${WITH_FEATURES[@]}"; do
   fi
 done
 
+# Git HTTPS credential proxy: a host-side socat listener answers git
+# credential requests from the sandbox with the host's own helper (e.g. Git
+# Credential Manager backed by the GNOME keyring and an Entra browser login),
+# restricted to AGENTBOX_GIT_CRED_HOSTS. The keyring / D-Bus session bus stay
+# outside the sandbox; only short-lived tokens for allowed hosts cross over.
+GIT_CRED_ARGS=()
+GIT_CRED_DIR="${GIT_CRED_DIR:-$SCRIPT_DIR/default/git-cred}"
+GIT_CRED_SANDBOX_DIR=/run/agentbox
+if [ "$GIT_CREDS" = true ] && [ "${#NET_ARGS[@]}" -gt 0 ]; then
+  if ! command -v socat >/dev/null 2>&1; then
+    echo "warning: socat not found; git HTTPS credential proxy disabled" >&2
+    GIT_CREDS=false
+  elif [ ! -f "$GIT_CRED_DIR/server.sh" ] || [ ! -f "$GIT_CRED_DIR/client.sh" ]; then
+    echo "warning: $GIT_CRED_DIR is incomplete; git HTTPS credential proxy disabled" >&2
+    GIT_CREDS=false
+  else
+    GIT_CRED_TMPDIR=$(mktemp -d)
+    CLEANUP_FILES+=("$GIT_CRED_TMPDIR")
+    GIT_CRED_SOCK="$GIT_CRED_TMPDIR/git-cred.sock"
+    # Copied so the socat EXEC string never contains spaces from SCRIPT_DIR.
+    cp "$GIT_CRED_DIR/server.sh" "$GIT_CRED_TMPDIR/server.sh"
+    cp "$GIT_CRED_DIR/client.sh" "$GIT_CRED_TMPDIR/client.sh"
+    if [ "$DRY_RUN" != true ]; then
+      git_cred_log="${XDG_STATE_HOME:-$HOME/.local/state}/agentbox/git-cred.log"
+      mkdir -p "$(dirname "$git_cred_log")"
+      # shellcheck disable=SC2094 # log path is only passed through as an env var
+      # setsid: no controlling terminal, so nothing can prompt on the TUI's tty.
+      AGENTBOX_GIT_CRED_LOG="$git_cred_log" setsid socat -t 300 \
+        "UNIX-LISTEN:$GIT_CRED_SOCK,fork,mode=600" \
+        "EXEC:bash $GIT_CRED_TMPDIR/server.sh" \
+        </dev/null 2>>"$git_cred_log" &
+      GIT_CRED_PID=$!
+      for _ in $(seq 50); do
+        [ -S "$GIT_CRED_SOCK" ] && break
+        sleep 0.1
+      done
+      if [ ! -S "$GIT_CRED_SOCK" ]; then
+        echo "warning: git credential proxy did not start (see $git_cred_log)" >&2
+        GIT_CREDS=false
+      fi
+    fi
+    if [ "$GIT_CREDS" = true ]; then
+      # Bind the socket only when it exists; dry runs show it as a try-bind.
+      GIT_CRED_ARGS=(
+        --bind-try "$GIT_CRED_SOCK" "$GIT_CRED_SANDBOX_DIR/git-cred.sock"
+        --ro-bind "$GIT_CRED_TMPDIR/client.sh" "$GIT_CRED_SANDBOX_DIR/git-cred-client"
+        --setenv AGENTBOX_GIT_CRED_SOCK "$GIT_CRED_SANDBOX_DIR/git-cred.sock"
+        # Highest-precedence git config: clear inherited helpers (e.g. GCM,
+        # which cannot reach the keyring in here), then use the proxy client.
+        --setenv GIT_CONFIG_COUNT 2
+        --setenv GIT_CONFIG_KEY_0 credential.helper
+        --setenv GIT_CONFIG_VALUE_0 ""
+        --setenv GIT_CONFIG_KEY_1 credential.helper
+        --setenv GIT_CONFIG_VALUE_1 "!sh $GIT_CRED_SANDBOX_DIR/git-cred-client"
+      )
+    fi
+  fi
+else
+  GIT_CREDS=false
+fi
+
 # Per-session sandbox details, appended after the static sandbox prompt so the
 # agent knows what this particular sandbox exposes.
 SESSION_INFO_TMP=$(mktemp)
@@ -602,6 +672,9 @@ CLEANUP_FILES+=("$SESSION_INFO_TMP")
     printf -- '- SSH keys: mounted read-only\n'
   else
     printf -- '- SSH keys: not available\n'
+  fi
+  if [ "$GIT_CREDS" = true ]; then
+    printf -- '- Git HTTPS: credentials for %s are proxied from the host helper (no keyring/D-Bus in here)\n' "${AGENTBOX_GIT_CRED_HOSTS:-dev.azure.com *.visualstudio.com}"
   fi
   # shellcheck disable=SC2016 # literal Markdown backticks
   [ "$KEEP_SECRETS" = false ] && printf -- '- `secrets`/`secret` directories in workspaces are hidden (empty)\n'
@@ -840,6 +913,7 @@ BWRAP_ARGS=(
   --bind-try "$HOME/.cargo" "$HOME/.cargo"
   --ro-bind-try "$HOME/.local/share/fonts" "$HOME/.local/share/fonts"
   "${SSH_BINDS[@]}"
+  "${GIT_CRED_ARGS[@]}"
   "${PODMAN_ARGS[@]}"
   "${RO_BINDS[@]}"
   "${SECRETS_SHADOW[@]}"

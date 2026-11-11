@@ -61,6 +61,7 @@
         agents.herdr
         jq
         git
+        socat
         gitui
         curl
         gh
@@ -148,6 +149,7 @@
             export DEFAULT_FEATURES="${defaultFeatures}"
             export OMNIROUTE_PLUGIN_V2="${omniroutePluginV2}"
             export PODMAN_DIR="${./podman}"
+            export GIT_CRED_DIR="${./default/git-cred}"
           ''
           + builtins.readFile ./sandbox.sh;
         };
