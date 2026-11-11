@@ -69,7 +69,6 @@
         podman
         agents.claude-code
         agents.codex
-        agents.t3code-desktop
         (python3.withPackages (ps: [ ps.pyyaml ]))
       ];
 
