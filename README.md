@@ -39,7 +39,9 @@ nix run . --refresh --accept-flake-config
 
 At startup an fzf menu asks which harness to launch first in the Herdr session
 (`opencode2`, `claude`, `codex`, `pi`, or `shell` for a plain bash pane; Esc aborts).
-The other harnesses can still be started in further panes. To skip the menu:
+In the session, `ctrl+b a` opens a new tab with the chosen harness, `ctrl+b A`
+picks another one from a popup menu, and `ctrl+b c` opens a plain shell tab. To
+skip the startup menu:
 
 ```sh
 nix run . -- --agent codex   # or: claude, opencode2, pi, shell

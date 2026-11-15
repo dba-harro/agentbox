@@ -6,3 +6,17 @@ default_shell = "bash"
 [update]
 version_check = false
 manifest_check = false
+
+# New tab with the harness chosen at sandbox start (AGENTBOX_AGENT).
+[[keys.command]]
+key = "prefix+a"
+type = "shell"
+command = 'bash "$HOME/.herdr-agent-tab.sh"'
+
+# New tab with a harness picked from an fzf menu.
+[[keys.command]]
+key = "prefix+shift+a"
+type = "popup"
+command = 'bash "$HOME/.herdr-agent-tab.sh" --pick'
+width = "40%"
+height = "40%"

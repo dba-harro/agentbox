@@ -999,6 +999,7 @@ BWRAP_ARGS=(
   "${RO_BINDS[@]}"
   "${SECRETS_SHADOW[@]}"
   --ro-bind-try "${HERDR_LAUNCHER:-$SCRIPT_DIR/default/herdr/herdr-launch.sh}" "$HOME/.herdr-launch.sh"
+  --ro-bind-try "${HERDR_AGENT_TAB:-$SCRIPT_DIR/default/herdr/agent-tab.sh}" "$HOME/.herdr-agent-tab.sh"
   --bind "$HERDR_CFG_TMPDIR" "$HOME/.config/herdr"
   --bind "$HERDR_STATE_TMPDIR" "$HOME/.local/state/herdr"
   --setenv HERDR_CONFIG_PATH "$HOME/.config/herdr/config.toml"
