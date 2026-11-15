@@ -65,7 +65,8 @@ Files:
 - `default/herdr/herdr-launch.sh` -- default sandbox command
 
 The launcher starts a headless Herdr server, creates a workspace for the current
-directory, auto-launches the `--agent` TUI (`opencode2` by default) in its root pane,
+directory, auto-launches the selected harness (`AGENTBOX_AGENT`: `opencode2`, `claude`,
+`codex`, `pi`; `shell` launches nothing) in its root pane,
 then attaches the client.
 `config.toml` disables onboarding and background update checks, and sets the
 default shell to `bash`.
@@ -86,7 +87,7 @@ Code review TUI settings:
 File: `flake.nix`
 
 Flake outputs:
-- `devShells.default` -- shell with all dependencies (bash, bubblewrap, bun, opencode2 (logo blanked), tuicr, herdr, jq, git, gitui, curl, gh, wl-clipboard, uv, claude-code, codex, multica, python3 with pyyaml)
+- `devShells.default` -- shell with all dependencies (bash, bubblewrap, bun, opencode2 (logo blanked), tuicr, herdr, jq, git, gitui, curl, gh, wl-clipboard, uv, claude-code, codex, pi, fzf, multica, python3 with pyyaml)
 - `apps.default` -- run the `sandbox` script
 - `packages.default` -- the built sandbox wrapper
 - `packages.omniroute-plugin-v2` -- the built OmniRoute opencode v2 plugin
@@ -94,7 +95,7 @@ Flake outputs:
 
 Flake inputs:
 - `nixpkgs` (nixpkgs-unstable)
-- `llm-agents.nix` (provides opencode2, tuicr, herdr, claude-code, codex, multica packages)
+- `llm-agents.nix` (provides opencode2, tuicr, herdr, claude-code, codex, pi, multica packages)
 - `omniroute-src` (pinned `diegosouzapw/OmniRoute` checkout, source for the v2 plugin)
 
 Extra substituter: `https://cache.numtide.com`

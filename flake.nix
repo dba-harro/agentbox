@@ -1,5 +1,5 @@
 {
-  description = "Sandboxed AI coding agent harnesses (opencode2, Claude Code, Codex)";
+  description = "Sandboxed AI coding agent harnesses (opencode2, Claude Code, Codex, pi)";
 
   nixConfig = {
     extra-substituters = [ "https://cache.numtide.com" ];
@@ -70,6 +70,8 @@
         podman
         agents.claude-code
         agents.codex
+        agents.pi
+        fzf
         agents.multica
         (python3.withPackages (ps: [ ps.pyyaml ]))
       ];
