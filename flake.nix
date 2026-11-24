@@ -60,6 +60,7 @@
         agents.tuicr
         agents.herdr
         jq
+        fzf
         git
         socat
         gitui

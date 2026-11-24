@@ -27,6 +27,7 @@ Defined in `sandbox.sh`:
 | Flag | Description |
 |------|-------------|
 | `--agent NAME` | Agent TUI auto-launched in the Herdr session: `opencode2` (default), `claude` or `codex`. Ignored when an explicit command is given |
+| `--claude-account NAME` | Claude Code account: `personal` (`~/.claude`) or `NAME` (`~/.claude-NAME`, created if missing). Skips the fzf account picker; see [Claude accounts](#claude-accounts) |
 | `--no-git-init` | Skip git repository initialization prompt |
 | `--verbose`, `-v` | Print the full bwrap command before execution |
 | `--dry-run` | Print the full bwrap command and exit without starting the sandbox. Skips host changes (status line deployment, `~/.claude.json` import, git init, host directory creation) and the `$HOME` confirmation prompt |
@@ -42,6 +43,21 @@ Defined in `sandbox.sh`:
 | `-w`, `--workspace PATH` | Bind additional workspace directory (repeatable) |
 | `-r`, `--readonly PATH` | Bind additional directory read-only (repeatable) |
 
+## Claude accounts
+
+With `--agent claude`, an fzf picker in the Herdr launcher chooses the account before the session starts (`personal` first, then `work`, then any other `~/.claude-*` dir). Esc or a non-terminal falls back to `personal`; `--claude-account NAME` skips the picker. The choice is exported as `CLAUDE_CONFIG_DIR` before Herdr starts, so every pane in the session uses that account. A new account is created by starting once with `--claude-account NAME`, then `/login`.
+
+| Account | Config dir |
+|---------|------------|
+| `personal` | `~/.claude` (the existing dir, stays logged in) |
+| `work`, `NAME` | `~/.claude-work`, `~/.claude-NAME` |
+
+`~/.claude-shared` holds what every account shares. On each start `sandbox.sh` creates it (with `skills/ commands/ agents/ plugins/ CLAUDE.md settings.json`) and symlinks those items into every account dir. Existing real content in an account is first merged into the shared dir without overwriting and the original kept as `<item>.bak.<timestamp>`. Because Claude rewrites files via temp+rename, a regular file that replaced a symlink is folded back into the shared copy at the next start. Credentials, `.claude.json` and session history stay per account.
+
+MCP servers: `~/.claude-shared/mcp.json` (`{"mcpServers": {...}}`, seeded once from the personal account) is merged into each account's `.claude.json` on start; shared entries win on name clashes. Servers added with `claude mcp add` stay local to that account unless also put in `mcp.json`.
+
+All account dirs are bound read-write in every session, so a session can read the other accounts' credentials.
+
 ## Behavior
 
 - Creates necessary directories (`~/.config/opencode`, `~/.opencode`, etc.) before sandbox entry
@@ -51,7 +67,7 @@ Defined in `sandbox.sh`:
 - Uses an isolated Herdr config/state (temp directories) to avoid polluting host Herdr state
 - OpenCode state (`~/.local/state/opencode`) is a per-sandbox mirror: the selected model (`model.json`), prompt history, and TUI layout are seeded from the host and copied back on exit, so they survive restarts and are shared by every session in the sandbox. Runtime files (`service.json`, `locks/`) are not persisted
 - Claude Code state persists in the host `~/.claude` directory, mounted read-write and exported as `CLAUDE_CONFIG_DIR`: settings, credentials (`~/.claude/.credentials.json`), global config/trust/MCP state (`~/.claude/.claude.json`, imported once from a pre-existing host `~/.claude.json`) and session transcripts all survive restarts
-- Deploys the bundled Claude Code status line (`default/claude/statusline.sh`) to `~/.claude/statusline.sh` and adds a `statusLine` entry to `~/.claude/settings.json` on every start. It is idempotent, backs up the settings file before changing it, and leaves a `statusLine` owned by another command untouched
+- Deploys the bundled Claude Code status line (`default/claude/statusline.sh`) to `~/.claude-shared/statusline.sh` and adds a `statusLine` entry to the shared `settings.json` on every start. It is idempotent, backs up the settings file before changing it, replaces the old `~/.claude/statusline.sh` entry, and leaves a `statusLine` owned by another command untouched
 - Codex state persists in the host `~/.codex` directory, mounted read-write: auth, config and session history survive restarts
 - The Multica CLI (`multica`, from llm-agents.nix) keeps its config and auth token in the host `~/.multica` directory (created with mode `700` if missing), mounted read-write, so `multica login` only has to be run once
 - Default command is `herdr-launch.sh` which starts a Herdr session and auto-launches the `--agent` TUI (opencode2 by default)
@@ -130,7 +146,7 @@ The sandbox mounts:
 - Podman (only with `--with-podman`): `/etc/containers` (read-only), `~/.local/share/agentbox/containers/storage` (read-write); `/etc/subuid` and `/etc/subgid` are replaced with empty files
 - TLS/SSL: `/etc/ssl`, `/etc/pki`, `/etc/ca-certificates`, `/etc/nix`, `/etc/static`
 - Timezone: `/etc/localtime`, `/etc/zoneinfo`, `/etc/timezone`
-- User config: `~/.config/opencode` (per-sandbox writable copy of the host directory; changes are discarded on exit), `~/.config/tuicr` (tmpfs), `~/.config/git`, `~/.config/nix`, `~/.claude` (read-write, exported as `CLAUDE_CONFIG_DIR`), `~/.codex` (read-write), `~/.multica` (read-write), `~/.config/anthropic`
+- User config: `~/.config/opencode` (per-sandbox writable copy of the host directory; changes are discarded on exit), `~/.config/tuicr` (tmpfs), `~/.config/git`, `~/.config/nix`, `~/.claude`, `~/.claude-*` and `~/.claude-shared` (read-write; the selected account is exported as `CLAUDE_CONFIG_DIR`), `~/.codex` (read-write), `~/.multica` (read-write), `~/.config/anthropic`
 - User data: `~/.cache/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode`
 - Herdr: isolated temp config and state directories
 

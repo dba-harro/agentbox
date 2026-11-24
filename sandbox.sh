@@ -17,6 +17,7 @@ BIND_SERIAL_DEV=false
 WITH_DOCKER=false
 AGENT=opencode2
 AGENT_SET=false
+CLAUDE_ACCOUNT=""
 RO_BINDS=()
 
 # Parse CLI flags before any side effects
@@ -69,6 +70,16 @@ while [ "$#" -gt 0 ]; do
     --no-net)
       NET_ARGS=()
       shift
+      ;;
+    --claude-account)
+      case "${2:-}" in
+        ""|shared|*[!a-z0-9_-]*)
+          echo "Error: --claude-account requires a name matching [a-z0-9_-]+ (not 'shared')" >&2
+          exit 1
+          ;;
+        *) CLAUDE_ACCOUNT="$2" ;;
+      esac
+      shift 2
       ;;
     --agent)
       case "${2:-}" in
@@ -138,6 +149,8 @@ Options:
   --docker                  Bind the host Docker socket (grants root-equivalent host access)
   --agent NAME              Agent TUI to launch in the Herdr session: opencode2 (default),
                             claude or codex
+  --claude-account NAME     Claude Code account to use ('personal' = ~/.claude, otherwise
+                            ~/.claude-NAME, created if missing); skips the account picker
   --with-NAME               Enable the optional feature overlay NAME (can be repeated)
   -w, --workspace PATH      Bind additional workspace directory (can be repeated)
   -r, --readonly PATH       Bind additional directory read-only (can be repeated)
@@ -281,6 +294,121 @@ if [ "$DRY_RUN" != true ]; then
   fi
 fi
 
+# Multiple Claude Code accounts. 'personal' is the existing ~/.claude, every
+# other account lives in ~/.claude-NAME ('work' always exists). Skills,
+# commands, agents, plugins, CLAUDE.md and settings.json are shared through
+# symlinks into ~/.claude-shared; credentials, .claude.json and session
+# history stay per account.
+CLAUDE_SHARED_DIR="$HOME/.claude-shared"
+CLAUDE_SHARED_ITEMS=(skills commands agents plugins CLAUDE.md settings.json)
+if [ -n "$CLAUDE_ACCOUNT" ] && [ "$CLAUDE_ACCOUNT" != personal ]; then
+  CLAUDE_CFG_DIR="$HOME/.claude-$CLAUDE_ACCOUNT"
+fi
+if [ "$DRY_RUN" != true ]; then
+  mkdir -p "$HOME/.claude-work" "$CLAUDE_CFG_DIR"
+fi
+
+# Every existing account dir (personal first), then the shared dir.
+CLAUDE_ACCOUNT_DIRS=("$HOME/.claude")
+for _d in "$HOME"/.claude-*/; do
+  _d="${_d%/}"
+  _n="${_d##*/.claude-}"
+  [ -d "$_d" ] || continue
+  case "$_n" in
+    shared|personal|""|*[!a-z0-9_-]*) continue ;;
+  esac
+  CLAUDE_ACCOUNT_DIRS+=("$_d")
+done
+CLAUDE_BINDS=()
+for _d in "${CLAUDE_ACCOUNT_DIRS[@]}" "$CLAUDE_SHARED_DIR"; do
+  CLAUDE_BINDS+=(--bind-try "$_d" "$_d")
+done
+
+# Link one shared item into one account dir. Existing real content is adopted
+# into the shared dir first (never overwritten), so nothing is lost and a new
+# account immediately sees what the others already have.
+link_claude_shared_item() {
+  local dir="$1" item="$2"
+  local src="$dir/$item" dst="$CLAUDE_SHARED_DIR/$item" ts
+  ts=$(date +%Y%m%d%H%M%S)
+
+  if [ -L "$src" ]; then
+    [ "$(readlink "$src")" = "$dst" ] && return 0
+    echo "warning: $src is a symlink to somewhere else; leaving it untouched" >&2
+    return 0
+  fi
+
+  if [ -d "$src" ]; then
+    cp -an "$src/." "$dst/" 2>/dev/null || true
+    mv "$src" "$src.bak.$ts" || return 0
+  elif [ -f "$src" ]; then
+    # Claude rewrites files via temp+rename, which replaces the symlink with a
+    # regular file. A newer (or seed-replacing) regular file carries the latest
+    # content, so fold it back into the shared copy before re-linking.
+    if [ ! -s "$dst" ] || { [ "$item" = settings.json ] && jq -e '. == {}' "$dst" >/dev/null 2>&1; } || [ "$src" -nt "$dst" ]; then
+      cp -p "$src" "$dst" || return 0
+    fi
+    mv "$src" "$src.bak.$ts" || return 0
+  fi
+  ln -s "$dst" "$src"
+}
+
+# Merge shared MCP servers (~/.claude-shared/mcp.json) into an account's
+# .claude.json. Shared entries win on name clashes; other keys stay untouched.
+# The file is only rewritten when the merge changes something.
+merge_claude_mcp() {
+  local cj="$1/.claude.json" tmp
+  [ -f "$CLAUDE_SHARED_DIR/mcp.json" ] || return 0
+  [ -f "$cj" ] || printf '{}\n' > "$cj"
+  tmp=$(mktemp "$cj.XXXXXX") || return 0
+  if jq --slurpfile s "$CLAUDE_SHARED_DIR/mcp.json" \
+      '.mcpServers = ((.mcpServers // {}) + ($s[0].mcpServers // {}))' "$cj" > "$tmp" \
+    && jq -e . "$tmp" >/dev/null 2>&1; then
+    if cmp -s "$tmp" "$cj"; then
+      rm -f "$tmp"
+    else
+      chmod --reference="$cj" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+      mv "$tmp" "$cj"
+    fi
+  else
+    rm -f "$tmp"
+    echo "warning: could not merge shared MCP servers into $cj" >&2
+  fi
+}
+
+reconcile_claude_shared() {
+  local item dir
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "warning: jq not found, skipping shared Claude config" >&2
+    return 0
+  fi
+
+  # Create everything the symlinks will point at before linking.
+  mkdir -p "$CLAUDE_SHARED_DIR"
+  for item in "${CLAUDE_SHARED_ITEMS[@]}"; do
+    case "$item" in
+      settings.json) [ -e "$CLAUDE_SHARED_DIR/$item" ] || printf '{}\n' > "$CLAUDE_SHARED_DIR/$item" ;;
+      *.md) [ -e "$CLAUDE_SHARED_DIR/$item" ] || : > "$CLAUDE_SHARED_DIR/$item" ;;
+      *) mkdir -p "$CLAUDE_SHARED_DIR/$item" ;;
+    esac
+  done
+
+  # Seed shared MCP servers from the personal account once.
+  if [ ! -f "$CLAUDE_SHARED_DIR/mcp.json" ] && [ -f "$HOME/.claude/.claude.json" ]; then
+    jq '{mcpServers: (.mcpServers // {})}' "$HOME/.claude/.claude.json" \
+      > "$CLAUDE_SHARED_DIR/mcp.json" 2>/dev/null \
+      || rm -f "$CLAUDE_SHARED_DIR/mcp.json"
+  fi
+
+  for dir in "${CLAUDE_ACCOUNT_DIRS[@]}"; do
+    for item in "${CLAUDE_SHARED_ITEMS[@]}"; do
+      link_claude_shared_item "$dir" "$item"
+    done
+    merge_claude_mcp "$dir"
+  done
+}
+[ "$DRY_RUN" = true ] || reconcile_claude_shared
+
 # Script location for referencing bundled configs
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -289,11 +417,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # settings file, and never replaces a statusLine owned by something else.
 deploy_claude_statusline() {
   local src="${CLAUDE_STATUSLINE:-$SCRIPT_DIR/default/claude/statusline.sh}"
-  local dst="$CLAUDE_CFG_DIR/statusline.sh"
-  local cfg="$CLAUDE_CFG_DIR/settings.json"
+  local dst="$CLAUDE_SHARED_DIR/statusline.sh"
+  local cfg="$CLAUDE_SHARED_DIR/settings.json"
   # Literal ~ so the path stays home-relative inside Claude's settings.json.
   # shellcheck disable=SC2088
-  local target='~/.claude/statusline.sh'
+  local target='~/.claude-shared/statusline.sh'
+  # shellcheck disable=SC2088
+  local legacy='~/.claude/statusline.sh'
   local current
 
   [ -f "$src" ] || return 0
@@ -302,7 +432,7 @@ deploy_claude_statusline() {
     return 0
   fi
 
-  mkdir -p "$CLAUDE_CFG_DIR" || return 0
+  mkdir -p "$CLAUDE_SHARED_DIR" || return 0
   if [ -L "$cfg" ]; then
     cfg=$(readlink -f "$cfg") || return 0
   fi
@@ -317,7 +447,7 @@ deploy_claude_statusline() {
   [ -f "$cfg" ] || printf '{}\n' > "$cfg"
 
   current=$(jq -r '.statusLine | if type == "object" then (.command // "") else "" end' "$cfg" 2>/dev/null) || return 0
-  if [ -n "$current" ] && [ "$current" != "$target" ] && [ "$current" != "$dst" ]; then
+  if [ -n "$current" ] && [ "$current" != "$target" ] && [ "$current" != "$dst" ] && [ "$current" != "$legacy" ]; then
     echo "warning: $cfg has a custom statusLine ($current); leaving it untouched" >&2
     return 0
   fi
@@ -930,6 +1060,7 @@ BWRAP_ARGS=(
   --dir "$RUNTIME_DIR"
   --setenv HOME "$HOME"
   --setenv AGENTBOX_AGENT "$AGENT"
+  --setenv AGENTBOX_CLAUDE_ACCOUNT "$CLAUDE_ACCOUNT"
   --chdir "$PWD"
   # Workspace binds come first: every sandbox-internal mount below is applied
   # afterwards, so a workspace that is a parent of a config/state/ssh path
@@ -942,7 +1073,7 @@ BWRAP_ARGS=(
   --bind "$OPCODE_STATE_TMPDIR" "$HOME/.local/state/opencode"
   --bind "$OPCODE_CFG_TMPDIR" "$OPENCODE_CFG"
   --bind-try "$HOME/.opencode" "$HOME/.opencode"
-  --bind-try "$HOME/.claude" "$HOME/.claude"
+  "${CLAUDE_BINDS[@]}"
   --bind-try "$HOME/.codex" "$HOME/.codex"
   --bind-try "$HOME/.multica" "$HOME/.multica"
   --bind-try "$HOME/.config/anthropic" "$HOME/.config/anthropic"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code status line: model, plan usage (5h/7d), context, session cost.
-# Deployed to ~/.claude/statusline.sh by sandbox.sh; edit the repo copy instead.
+# Deployed to ~/.claude-shared/statusline.sh by sandbox.sh; edit the repo copy instead.
 set -u
 export LC_NUMERIC=C
 
