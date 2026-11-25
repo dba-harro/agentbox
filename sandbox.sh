@@ -147,7 +147,7 @@ Options:
   --verbose, -v             Print the full bwrap command before execution
   --no-ssh-keys             Do not mount ~/.ssh in the sandbox (mounted read-only by default)
   --hide-secrets            Hide 'secrets'/'secret' directories (they are visible by default)
-  --no-git-creds            Do not proxy git HTTPS credentials (Azure DevOps) from the host
+  --no-git-creds            Do not proxy git HTTPS credentials (Azure DevOps, GitHub) from the host
   --no-azure                Do not persist the Azure CLI login (~/.azure) from the host
   --no-open-url             Do not forward xdg-open/\$BROWSER URLs to the host browser
   --no-net                  Disable network access in the sandbox
@@ -897,7 +897,7 @@ CLEANUP_FILES+=("$SESSION_INFO_TMP")
     printf -- '- SSH keys: not available\n'
   fi
   if [ "$GIT_CREDS" = true ]; then
-    printf -- '- Git HTTPS: credentials for %s are proxied from the host helper (no keyring/D-Bus in here)\n' "${AGENTBOX_GIT_CRED_HOSTS:-dev.azure.com *.visualstudio.com}"
+    printf -- '- Git HTTPS: credentials for %s are proxied from the host helper (no keyring/D-Bus in here)\n' "${AGENTBOX_GIT_CRED_HOSTS:-dev.azure.com *.visualstudio.com github.com}"
   fi
   if [ "$MOUNT_AZURE" = true ]; then
     # shellcheck disable=SC2016 # literal Markdown backticks

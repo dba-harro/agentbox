@@ -93,7 +93,7 @@ All account dirs are bound read-write in every session, so a session can read th
 
 ## Git HTTPS credentials
 
-Git over HTTPS to Azure DevOps uses the host's credential helper, e.g. Git Credential Manager (GCM) with the GNOME keyring (`secretservice`) and an Entra ID browser login. GCM can't run inside the sandbox: `/run` is a private tmpfs, so the D-Bus session bus and the keyring aren't there. Mounting the bus is deliberately avoided, because the sandbox could then read every secret in the keyring.
+Git over HTTPS to Azure DevOps and GitHub uses the host's credential helper, e.g. Git Credential Manager (GCM) with the GNOME keyring (`secretservice`) and an Entra ID (Azure DevOps) or GitHub OAuth browser login. GCM can't run inside the sandbox: `/run` is a private tmpfs, so the D-Bus session bus and the keyring aren't there. Mounting the bus is deliberately avoided, because the sandbox could then read every secret in the keyring.
 
 Instead, `sandbox.sh` starts a small proxy on the host (unless `--no-git-creds` or `--no-net` is given):
 
@@ -102,9 +102,10 @@ sandbox: git -> /run/agentbox/git-cred-client -> unix socket -> host: socat -> d
 ```
 
 - Inside the sandbox, `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` clear the inherited `credential.helper` list and set the proxy client as the only helper. The host git config files are not touched
-- The server only answers `https` requests for hosts in `AGENTBOX_GIT_CRED_HOSTS`, a space-separated list of globs (default: `dev.azure.com *.visualstudio.com`). Anything else gets an empty reply
+- The server only answers `https` requests for hosts in `AGENTBOX_GIT_CRED_HOSTS`, a space-separated list of globs (default: `dev.azure.com *.visualstudio.com github.com`). Anything else gets an empty reply
 - Only `username`, `password` and `password_expiry_utc` are passed back. Refresh tokens and the keyring stay on the host. `erase` is forwarded (`git credential reject`), and `store` is ignored
 - If the host token has expired, GCM opens the Entra login in the host browser, as it does outside the sandbox. Terminal prompts are disabled (`GIT_TERMINAL_PROMPT=0`, and the listener has no controlling terminal)
+- GitHub: GCM's GitHub login is an OAuth token with `repo` scope, so while the sandbox runs the agent can push to every repo your GitHub account can. Use `--no-git-creds` to turn it off, or narrow `AGENTBOX_GIT_CRED_HOSTS`
 - Requests are logged without secrets to `${XDG_STATE_HOME:-~/.local/state}/agentbox/git-cred.log`
 - Trade-off: while the sandbox runs, the agent can fetch and push to every repo the logged-in account can access on the allowed hosts
 

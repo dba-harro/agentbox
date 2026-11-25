@@ -15,7 +15,7 @@
 # reply, which git treats as "no credential". Tokens are never logged.
 set -u
 
-allowed_hosts=${AGENTBOX_GIT_CRED_HOSTS:-"dev.azure.com *.visualstudio.com"}
+allowed_hosts=${AGENTBOX_GIT_CRED_HOSTS:-"dev.azure.com *.visualstudio.com github.com"}
 log_file=${AGENTBOX_PROXY_LOG:-/dev/null}
 
 log() {
