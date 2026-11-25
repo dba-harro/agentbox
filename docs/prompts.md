@@ -1,6 +1,6 @@
 # Agent Prompts
 
-Prompt files live in `default/prompts/` (base) and per-feature `prompts/` overlays. At session start `sandbox.sh` concatenates them into a single global `~/.config/opencode/AGENTS.md`, which is how opencode2 loads instructions (the V2 config `instructions` field is accepted but not resolved). The sandbox prompt and feature prompts are also delivered to Claude Code and Codex (see [Sandbox](#sandbox-defaultpromptssandboxmd)).
+Prompt files live in `default/prompts/` (base) and per-feature `prompts/` overlays. At session start `sandbox.sh` concatenates them into a single global `~/.config/opencode/AGENTS.md`, which is how opencode2 loads instructions (the V2 config `instructions` field is accepted but not resolved). The sandbox prompt and feature prompts are also delivered to Claude Code, Codex and pi (see [Sandbox](#sandbox-defaultpromptssandboxmd)).
 
 ## General (`default/prompts/general.md`)
 
@@ -29,5 +29,6 @@ Unlike the other prompts it reaches every harness:
 | opencode2 | Part of `~/.config/opencode/AGENTS.md` (with all other prompts) |
 | Claude Code | `/etc/claude-code/CLAUDE.md` (managed memory, loaded in addition to `~/.claude/CLAUDE.md`) |
 | Codex | `~/.codex/AGENTS.md`, shadowed read-only: the host file (if any) followed by the sandbox prompt. An empty mount point left behind when the host has no such file is removed on exit |
+| pi | `~/.pi/agent/AGENTS.md`, shadowed read-only like Codex. The host content is the first existing of `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` in `~/.pi/agent`, so a host `CLAUDE.md` is not hidden |
 
-Claude Code and Codex get only the sandbox prompt and enabled feature prompts (e.g. `podman.md`), not `general.md`/`karpathy.md`. The Codex prompt is only added when `~/.codex` exists on the host.
+Claude Code, Codex and pi get only the sandbox prompt and enabled feature prompts (e.g. `podman.md`), not `general.md`/`karpathy.md`. The Codex prompt is only added when `~/.codex` exists on the host.

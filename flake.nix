@@ -1,5 +1,5 @@
 {
-  description = "Sandboxed AI coding agent harnesses (opencode2, Claude Code, Codex, Pi)";
+  description = "Sandboxed AI coding agent harnesses (opencode2, Claude Code, Codex, pi)";
 
   nixConfig = {
     extra-substituters = [ "https://cache.numtide.com" ];
@@ -71,8 +71,8 @@
         podman
         agents.claude-code
         agents.codex
-        agents.multica
         agents.pi
+        agents.multica
         (python3.withPackages (ps: [ ps.pyyaml ]))
       ];
 
@@ -145,6 +145,7 @@
             export OPENCODE_JSONC="${./default/opencode.jsonc}"
             export HERDR_CONFIG="${./default/herdr/config.toml}"
             export HERDR_LAUNCHER="${./default/herdr/herdr-launch.sh}"
+            export HERDR_AGENT_TAB="${./default/herdr/agent-tab.sh}"
             export CLAUDE_STATUSLINE="${./default/claude/statusline.sh}"
             export TUICR_CONFIG="${./default/tuicr/config.toml}"
             export MERGE_SCRIPT="${./merge-jsonc.js}"

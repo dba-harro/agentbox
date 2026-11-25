@@ -15,7 +15,7 @@ OPEN_URL=true
 KEEP_SECRETS=true
 BIND_SERIAL_DEV=false
 WITH_DOCKER=false
-AGENT=opencode2
+AGENT=""
 AGENT_SET=false
 CLAUDE_ACCOUNT=""
 RO_BINDS=()
@@ -83,9 +83,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --agent)
       case "${2:-}" in
-        opencode2|claude|codex) AGENT="$2"; AGENT_SET=true ;;
+        opencode2|claude|codex|pi|shell) AGENT="$2"; AGENT_SET=true ;;
         *)
-          echo "Error: --agent requires one of: opencode2, claude, codex" >&2
+          echo "Error: --agent requires one of: opencode2, claude, codex, pi, shell" >&2
           exit 1
           ;;
       esac
@@ -131,7 +131,7 @@ if [ "$SHOW_HELP" = true ]; then
   cat <<EOF
 Usage: sandbox [OPTIONS] [COMMAND] [ARGS...]
 
-Run AI coding agent harnesses (opencode2, Claude Code, Codex) inside a bubblewrap sandbox.
+Run AI coding agent harnesses (opencode2, Claude Code, Codex, pi) inside a bubblewrap sandbox.
 
 Options:
   -h, --help                Show this help message
@@ -147,8 +147,8 @@ Options:
   --no-net                  Disable network access in the sandbox
   --bind-serial-dev         Bind host ttyUSB* and ttyACM* serial devices into the sandbox
   --docker                  Bind the host Docker socket (grants root-equivalent host access)
-  --agent NAME              Agent TUI to launch in the Herdr session: opencode2 (default),
-                            claude or codex
+  --agent NAME              Agent TUI to launch in the Herdr session: opencode2, claude,
+                            codex, pi, or shell (plain bash). Skips the selection menu
   --claude-account NAME     Claude Code account to use ('personal' = ~/.claude, otherwise
                             ~/.claude-NAME, created if missing); skips the account picker
   --with-NAME               Enable the optional feature overlay NAME (can be repeated)
@@ -158,8 +158,9 @@ Options:
 Apps:
   nix run .                Sandbox app (bare minimum dependencies)
 
-If no COMMAND is given, defaults to a herdr session auto-launching the --agent TUI
-(opencode2 unless overridden).
+If no COMMAND is given, starts a herdr session auto-launching the --agent TUI.
+Without --agent, an fzf menu asks which harness to launch first (Esc aborts).
+\$AGENTBOX_AGENT preselects it instead; without a terminal, opencode2 is used.
 EOF
   exit 0
 fi
@@ -262,6 +263,28 @@ EOF
   fi
 fi
 
+# Harness for the herdr root pane. Asked interactively (fzf) unless --agent,
+# $AGENTBOX_AGENT, an explicit COMMAND, --dry-run or a missing terminal decide
+# it. Runs on the host before any host changes, so aborting leaves no trace.
+if [ -z "$AGENT" ]; then
+  case "${AGENTBOX_AGENT:-}" in
+    opencode2|claude|codex|pi|shell) AGENT="$AGENTBOX_AGENT" ;;
+  esac
+fi
+if [ -z "$AGENT" ]; then
+  if [ $# -eq 0 ] && [ "$DRY_RUN" != true ] && [ -t 0 ] && [ -t 1 ] && command -v fzf >/dev/null 2>&1; then
+    AGENT=$(printf '%s\n' opencode2 claude codex pi shell |
+      fzf --height=~10 --reverse --no-multi --prompt='harness> ' \
+        --header='Select the first harness to launch (Esc aborts)') || true
+    if [ -z "$AGENT" ]; then
+      echo "Aborted: no harness selected." >&2
+      exit 130
+    fi
+  else
+    AGENT=opencode2
+  fi
+fi
+
 # Host directories bound into the sandbox (skipped in --dry-run)
 if [ "$DRY_RUN" != true ]; then
   mkdir -p "$HOME/.config/opencode"
@@ -277,6 +300,9 @@ if [ "$DRY_RUN" != true ]; then
   # host so `multica login` inside the sandbox persists across restarts.
   mkdir -p "$HOME/.multica"
   chmod 700 "$HOME/.multica"
+  # pi config, auth and sessions (~/.pi/agent), persisted like ~/.claude.
+  mkdir -p "$HOME/.pi/agent"
+  chmod 700 "$HOME/.pi"
 fi
 
 # Claude Code resolves its config dir from CLAUDE_CONFIG_DIR, falling back to
@@ -477,6 +503,7 @@ deploy_claude_statusline() {
 
 # Temp files cleanup
 CLEANUP_FILES=()
+SHADOW_CREATED=()
 OPENCODE_CFG="$HOME/.config/opencode"
 
 # Copy user preferences out of the per-sandbox state mirror back to the host
@@ -503,10 +530,11 @@ persist_state() {
 # shellcheck disable=SC2329 # invoked via trap
 cleanup() {
   persist_state
-  # Empty mount point bwrap created for the Codex AGENTS.md shadow
-  if [ "${CODEX_AGENTS_CREATED:-false}" = true ] && [ -f "$CODEX_AGENTS" ] && [ ! -s "$CODEX_AGENTS" ]; then
-    rm -f "$CODEX_AGENTS"
-  fi
+  # Empty mount points bwrap created for the Codex/pi AGENTS.md shadows
+  local target
+  for target in "${SHADOW_CREATED[@]}"; do
+    [ -f "$target" ] && [ ! -s "$target" ] && rm -f "$target"
+  done
   if [ "${#HOST_PROXY_PIDS[@]}" -gt 0 ]; then
     kill "${HOST_PROXY_PIDS[@]}" 2>/dev/null || true
   fi
@@ -904,23 +932,32 @@ CLEANUP_FILES+=("$SANDBOX_PROMPT_TMP")
 # user's ~/.claude/CLAUDE.md, so no host file is shadowed.
 RO_BINDS+=(--ro-bind "$SANDBOX_PROMPT_TMP" /etc/claude-code/CLAUDE.md)
 
-# Codex has no system-wide instructions file, so ~/.codex/AGENTS.md is
-# shadowed (read-only) by the host file followed by the sandbox prompt. When
-# the host has none, bwrap leaves an empty mount point behind, which is
-# removed again on exit.
-CODEX_AGENTS="$HOME/.codex/AGENTS.md"
-CODEX_AGENTS_CREATED=false
-if [ "$DRY_RUN" != true ] && [ -d "$HOME/.codex" ]; then
-  [ -e "$CODEX_AGENTS" ] || CODEX_AGENTS_CREATED=true
-  CODEX_PROMPT_TMP=$(mktemp)
-  CLEANUP_FILES+=("$CODEX_PROMPT_TMP")
-  if [ -f "$CODEX_AGENTS" ]; then
-    cat "$CODEX_AGENTS" > "$CODEX_PROMPT_TMP"
-    printf '\n' >> "$CODEX_PROMPT_TMP"
-  fi
-  cat "$SANDBOX_PROMPT_TMP" >> "$CODEX_PROMPT_TMP"
-  RO_BINDS+=(--ro-bind "$CODEX_PROMPT_TMP" "$CODEX_AGENTS")
-fi
+# Codex and pi have no system-wide instructions file, so their global
+# AGENTS.md is shadowed (read-only) by the host instructions followed by the
+# sandbox prompt. The host instructions are the first existing file of the
+# remaining arguments (pi also reads CLAUDE.md, which a new AGENTS.md would
+# otherwise hide). When the target does not exist, bwrap leaves an empty mount
+# point behind, which is removed again on exit.
+shadow_agents_md() {
+  local target="$1" src tmp
+  shift
+  [ "$DRY_RUN" != true ] && [ -d "$(dirname "$target")" ] || return 0
+  [ -e "$target" ] || SHADOW_CREATED+=("$target")
+  tmp=$(mktemp)
+  CLEANUP_FILES+=("$tmp")
+  for src in "$target" "$@"; do
+    if [ -f "$src" ]; then
+      cat "$src" > "$tmp"
+      printf '\n' >> "$tmp"
+      break
+    fi
+  done
+  cat "$SANDBOX_PROMPT_TMP" >> "$tmp"
+  RO_BINDS+=(--ro-bind "$tmp" "$target")
+}
+shadow_agents_md "$HOME/.codex/AGENTS.md"
+shadow_agents_md "$HOME/.pi/agent/AGENTS.md" \
+  "$HOME/.pi/agent/AGENTS.MD" "$HOME/.pi/agent/CLAUDE.md" "$HOME/.pi/agent/CLAUDE.MD"
 
 # opencode.jsonc: the base config and each enabled feature overlay are merged
 # into plain JSON (comments and trailing commas stripped), so later jq steps
@@ -1076,6 +1113,7 @@ BWRAP_ARGS=(
   "${CLAUDE_BINDS[@]}"
   --bind-try "$HOME/.codex" "$HOME/.codex"
   --bind-try "$HOME/.multica" "$HOME/.multica"
+  --bind-try "$HOME/.pi" "$HOME/.pi"
   --bind-try "$HOME/.config/anthropic" "$HOME/.config/anthropic"
   --tmpfs "$HOME/.config/tuicr"
   --ro-bind-try "${TUICR_CONFIG:-$SCRIPT_DIR/default/tuicr/config.toml}" "$HOME/.config/tuicr/config.toml"
@@ -1092,12 +1130,15 @@ BWRAP_ARGS=(
   "${RO_BINDS[@]}"
   "${SECRETS_SHADOW[@]}"
   --ro-bind-try "${HERDR_LAUNCHER:-$SCRIPT_DIR/default/herdr/herdr-launch.sh}" "$HOME/.herdr-launch.sh"
+  --ro-bind-try "${HERDR_AGENT_TAB:-$SCRIPT_DIR/default/herdr/agent-tab.sh}" "$HOME/.herdr-agent-tab.sh"
   --bind "$HERDR_CFG_TMPDIR" "$HOME/.config/herdr"
   --bind "$HERDR_STATE_TMPDIR" "$HOME/.local/state/herdr"
   --setenv HERDR_CONFIG_PATH "$HOME/.config/herdr/config.toml"
   --setenv TMPDIR /tmp
   --setenv OPENCODE_CONFIG_DIR "$OPENCODE_CFG"
   --setenv CLAUDE_CONFIG_DIR "$CLAUDE_CFG_DIR"
+  --setenv PI_CODING_AGENT_DIR "$HOME/.pi/agent"
+  --setenv PI_SKIP_VERSION_CHECK 1
   --unsetenv NODE_TLS_REJECT_UNAUTHORIZED
   --setenv CARGO_NET_OFFLINE false
   "${CA_ENV[@]}"

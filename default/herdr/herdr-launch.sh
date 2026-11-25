@@ -3,8 +3,10 @@
 set -euo pipefail
 
 # Start the headless herdr server, create a workspace for $PWD, auto-launch
-# the selected agent TUI (AGENTBOX_AGENT: opencode2|claude|codex) in its root pane, then attach the client. The client blocks until
-# the user detaches; bwrap then tears down the namespace (killing the server).
+# the selected agent TUI (AGENTBOX_AGENT: opencode2|claude|codex|pi) in its
+# root pane, then attach the client. AGENTBOX_AGENT=shell leaves the root pane
+# as a plain shell. The client blocks until the user detaches; bwrap then tears
+# down the namespace (killing the server).
 
 # Claude only: pick the account (config dir) before the server starts, so every
 # pane in this session inherits CLAUDE_CONFIG_DIR. 'personal' is ~/.claude,
@@ -63,9 +65,11 @@ fi
 case "${AGENTBOX_AGENT:-opencode2}" in
   claude) agent=claude ;;
   codex) agent=codex ;;
+  pi) agent=pi ;;
+  shell) agent= ;;
   *) agent=opencode2 ;;
 esac
 
-herdr pane run "$root_pane" "$agent"
+[ -n "$agent" ] && herdr pane run "$root_pane" "$agent"
 
 herdr

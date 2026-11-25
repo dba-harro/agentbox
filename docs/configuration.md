@@ -63,12 +63,24 @@ snapshot file before reloading, or lower `modelCacheTtlMs` in the plugin
 Files:
 - `default/herdr/config.toml` -- Herdr session configuration
 - `default/herdr/herdr-launch.sh` -- default sandbox command
+- `default/herdr/agent-tab.sh` -- opens a new tab running a harness (bound to keys below)
 
 The launcher starts a headless Herdr server, creates a workspace for the current
-directory, auto-launches the `--agent` TUI (`opencode2` by default) in its root pane,
+directory, auto-launches the selected harness (`AGENTBOX_AGENT`: `opencode2`, `claude`,
+`codex`, `pi`; `shell` launches nothing) in its root pane,
 then attaches the client.
 `config.toml` disables onboarding and background update checks, and sets the
-default shell to `bash`.
+default shell to `bash`. It also binds two custom keys:
+
+| Key | Action |
+|-----|--------|
+| `prefix+a` (`ctrl+b a`) | New tab running the harness chosen at sandbox start (`AGENTBOX_AGENT`) |
+| `prefix+shift+a` (`ctrl+b A`) | Popup fzf menu, then a new tab running the picked harness (`shell` = plain bash) |
+
+The normal new-tab key (`prefix+c`) still opens a plain shell. The config is
+bundled: `sandbox.sh` copies it into a per-session temp dir, so the host
+`~/.config/herdr` is never used and changes made inside the sandbox are
+discarded on exit.
 
 ## tuicr Config
 
@@ -86,7 +98,7 @@ Code review TUI settings:
 File: `flake.nix`
 
 Flake outputs:
-- `devShells.default` -- shell with all dependencies (bash, bubblewrap, bun, opencode2 (logo blanked), tuicr, herdr, jq, fzf, git, gitui, curl, gh, wl-clipboard, uv, claude-code, codex, multica, python3 with pyyaml)
+- `devShells.default` -- shell with all dependencies (bash, bubblewrap, bun, opencode2 (logo blanked), tuicr, herdr, jq, fzf, git, gitui, curl, gh, wl-clipboard, uv, claude-code, codex, pi, multica, python3 with pyyaml)
 - `apps.default` -- run the `sandbox` script
 - `packages.default` -- the built sandbox wrapper
 - `packages.omniroute-plugin-v2` -- the built OmniRoute opencode v2 plugin
@@ -94,7 +106,7 @@ Flake outputs:
 
 Flake inputs:
 - `nixpkgs` (nixpkgs-unstable)
-- `llm-agents.nix` (provides opencode2, tuicr, herdr, claude-code, codex, multica packages)
+- `llm-agents.nix` (provides opencode2, tuicr, herdr, claude-code, codex, pi, multica packages)
 - `omniroute-src` (pinned `diegosouzapw/OmniRoute` checkout, source for the v2 plugin)
 
 Extra substituter: `https://cache.numtide.com`

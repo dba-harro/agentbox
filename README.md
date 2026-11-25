@@ -1,6 +1,6 @@
 # agentbox
 
-Sandboxed environment for AI coding agent harnesses -- opencode2, Claude Code and Codex -- running via Nix with Bubblewrap isolation.
+Sandboxed environment for AI coding agent harnesses -- opencode2, Claude Code, Codex and pi -- running via Nix with Bubblewrap isolation.
 
 ## Documentation
 
@@ -14,13 +14,13 @@ Sandboxed environment for AI coding agent harnesses -- opencode2, Claude Code an
 ## Features
 
 - **Bubblewrap sandbox** (`sandbox.sh`) -- Isolates the agent harnesses from the host filesystem to reduce secret exposure risk
-- **Multiple harnesses** -- opencode2 (default, auto-launched), Claude Code and Codex are all available inside the sandbox, with their state persisted in `~/.local/share/opencode` + `~/.local/state/opencode`, `~/.claude` and `~/.codex`; the Multica CLI (`multica`) is included too, with its auth token persisted in `~/.multica`
-- **Herdr terminal workspace** -- Agent-native session that auto-launches the selected agent TUI (opencode2 by default)
+- **Multiple harnesses** -- opencode2, Claude Code, Codex and pi are all available inside the sandbox, with their state persisted in `~/.local/share/opencode` + `~/.local/state/opencode`, `~/.claude`, `~/.codex` and `~/.pi`; the Multica CLI (`multica`) is included too, with its auth token persisted in `~/.multica`
+- **Herdr terminal workspace** -- Agent-native session that auto-launches the harness picked from an fzf menu at startup (or set with `--agent`)
 - **OmniRoute plugin** -- Official opencode v2 plugin (`@omniroute/opencode-plugin-v2`), built from a pinned source checkout and opt-in via a host `~/.config/opencode/omniroute.json`
 - **Podman** (`--with-podman`) -- Nested rootless podman inside the sandbox (single uid, host networking, persistent image storage), see [Sandbox](docs/sandbox.md#podman)
 - **tuicr** -- TUI code review tool with vim keybindings, launched via `/tuicr` command in a Herdr tab
 - **Custom opencode2 commands** -- `/commit` (conventional commits), `/docs` (documentation generation), `/tuicr` (code review)
-- **Custom agent instructions** -- General guidelines and Karpathy-style coding rules concatenated into a global `AGENTS.md`, plus a sandbox prompt for all three harnesses
+- **Custom agent instructions** -- General guidelines and Karpathy-style coding rules concatenated into a global `AGENTS.md`, plus a sandbox prompt for all harnesses
 - **Version-pinned** -- All tools and dependencies pinned via the Nix flake lockfile
 
 ## Usage
@@ -37,10 +37,14 @@ Or from the cloned repo directly:
 nix run . --refresh --accept-flake-config
 ```
 
-To start a different agent TUI in the Herdr session (`opencode2` is the default):
+At startup an fzf menu asks which harness to launch first in the Herdr session
+(`opencode2`, `claude`, `codex`, `pi`, or `shell` for a plain bash pane; Esc aborts).
+In the session, `ctrl+b a` opens a new tab with the chosen harness, `ctrl+b A`
+picks another one from a popup menu, and `ctrl+b c` opens a plain shell tab. To
+skip the startup menu:
 
 ```sh
-nix run . -- --agent codex   # or: claude, opencode2
+nix run . -- --agent codex   # or: claude, opencode2, pi, shell
 ```
 
 ## Quitting

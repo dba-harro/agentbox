@@ -26,7 +26,7 @@ Defined in `sandbox.sh`:
 
 | Flag | Description |
 |------|-------------|
-| `--agent NAME` | Agent TUI auto-launched in the Herdr session: `opencode2` (default), `claude` or `codex`. Ignored when an explicit command is given |
+| `--agent NAME` | Agent TUI auto-launched in the Herdr session: `opencode2`, `claude`, `codex`, `pi`, or `shell` (plain bash root pane). Skips the harness menu; ignored when an explicit command is given |
 | `--claude-account NAME` | Claude Code account: `personal` (`~/.claude`) or `NAME` (`~/.claude-NAME`, created if missing). Skips the fzf account picker; see [Claude accounts](#claude-accounts) |
 | `--no-git-init` | Skip git repository initialization prompt |
 | `--verbose`, `-v` | Print the full bwrap command before execution |
@@ -70,7 +70,9 @@ All account dirs are bound read-write in every session, so a session can read th
 - Deploys the bundled Claude Code status line (`default/claude/statusline.sh`) to `~/.claude-shared/statusline.sh` and adds a `statusLine` entry to the shared `settings.json` on every start. It is idempotent, backs up the settings file before changing it, replaces the old `~/.claude/statusline.sh` entry, and leaves a `statusLine` owned by another command untouched
 - Codex state persists in the host `~/.codex` directory, mounted read-write: auth, config and session history survive restarts
 - The Multica CLI (`multica`, from llm-agents.nix) keeps its config and auth token in the host `~/.multica` directory (created with mode `700` if missing), mounted read-write, so `multica login` only has to be run once
-- Default command is `herdr-launch.sh` which starts a Herdr session and auto-launches the `--agent` TUI (opencode2 by default)
+- pi state persists in the host `~/.pi` directory (created with mode `700` if missing), mounted read-write with `PI_CODING_AGENT_DIR=~/.pi/agent`: settings, auth (`auth.json`) and sessions survive restarts. `PI_SKIP_VERSION_CHECK=1` disables its update check
+- Harness selection: without `--agent` and without an explicit command, an fzf menu on the host (before any host changes) asks which harness to launch first: `opencode2`, `claude`, `codex`, `pi` or `shell`. Esc/Ctrl-C aborts with exit code 130. A valid `AGENTBOX_AGENT` in the host environment preselects the harness without the menu; with `--dry-run` or without a terminal, `opencode2` is used
+- Default command is `herdr-launch.sh` which starts a Herdr session and auto-launches the selected harness in the root pane (`shell` leaves it a plain bash)
 - If arguments are provided, they are passed directly as the sandbox command instead
 - Network binds (`resolv.conf`, `hosts`, `nsswitch.conf`) are conditional on `--no-net`; the Docker socket is only bound with `--docker`
 - Wayland socket is auto-detected and mounted for GUI clipboard support
@@ -83,7 +85,7 @@ All account dirs are bound read-write in every session, so a session can read th
 - Workspace binds (`$PWD` and `-w` paths) are applied **before** all sandbox-internal mounts, so running from a parent of the config/state paths (e.g. `~` or `~/.config/opencode`) cannot shadow the prepared environment
 - A workspace that contains a protected system mount root (`/`, `/usr`, `/bin`, `/lib`, `/lib64`, `/sbin`, `/nix`, `/etc`, `/proc`, `/sys`, `/dev`, `/run`) is rejected with an error, since such a bind would shadow the sandbox's system mounts
 - The bundled prompts plus any enabled feature prompts are concatenated into a single global `~/.config/opencode/AGENTS.md` (opencode2 loads instructions from `AGENTS.md`; the config `instructions` field is accepted but not resolved in V2)
-- The sandbox prompt (`default/prompts/sandbox.md` plus generated session details: workspaces, network, SSH, enabled features) and the feature prompts are also given to Claude Code, as the managed memory file `/etc/claude-code/CLAUDE.md` (loaded alongside `~/.claude/CLAUDE.md`), and to Codex, by shadowing `~/.codex/AGENTS.md` read-only with the host file followed by the sandbox prompt. See [Prompts](prompts.md#sandbox-defaultpromptssandboxmd)
+- The sandbox prompt (`default/prompts/sandbox.md` plus generated session details: workspaces, network, SSH, enabled features) and the feature prompts are also given to Claude Code, as the managed memory file `/etc/claude-code/CLAUDE.md` (loaded alongside `~/.claude/CLAUDE.md`), and to Codex and pi, by shadowing `~/.codex/AGENTS.md` and `~/.pi/agent/AGENTS.md` read-only with the host file followed by the sandbox prompt. See [Prompts](prompts.md#sandbox-defaultpromptssandboxmd)
 
 ## Git HTTPS credentials
 
@@ -128,7 +130,7 @@ nix run . -- --with-podman
 - Config comes from `podman/containers/` and is mounted read-only at `/etc/containers`; `CONTAINERS_CONF`, `CONTAINERS_STORAGE_CONF` and `CONTAINERS_REGISTRIES_CONF` point at it
 - Images persist in a dedicated host directory, `~/.local/share/agentbox/containers/storage`. The host's own podman store (`~/.local/share/containers`) is not shared, since it uses a different uid mapping
 - `/etc/subuid` and `/etc/subgid` are replaced with empty files, so podman uses a single-uid mapping instead of failing on the setuid `newuidmap` (which cannot work under bubblewrap's `no_new_privs`)
-- `podman/prompts/podman.md` is added to the agent prompts (opencode, Claude Code, Codex) so the agent knows the limits below
+- `podman/prompts/podman.md` is added to the agent prompts (opencode, Claude Code, Codex, pi) so the agent knows the limits below
 
 Limitations:
 
