@@ -11,6 +11,7 @@ EXTRA_WORKSPACES=()
 RO_WORKSPACES=()
 MOUNT_SSH=true
 GIT_CREDS=true
+MOUNT_AZURE=true
 OPEN_URL=true
 KEEP_SECRETS=true
 BIND_SERIAL_DEV=false
@@ -57,6 +58,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-git-creds)
       GIT_CREDS=false
+      shift
+      ;;
+    --no-azure)
+      MOUNT_AZURE=false
       shift
       ;;
     --no-open-url)
@@ -143,6 +148,7 @@ Options:
   --no-ssh-keys             Do not mount ~/.ssh in the sandbox (mounted read-only by default)
   --hide-secrets            Hide 'secrets'/'secret' directories (they are visible by default)
   --no-git-creds            Do not proxy git HTTPS credentials (Azure DevOps) from the host
+  --no-azure                Do not persist the Azure CLI login (~/.azure) from the host
   --no-open-url             Do not forward xdg-open/\$BROWSER URLs to the host browser
   --no-net                  Disable network access in the sandbox
   --bind-serial-dev         Bind host ttyUSB* and ttyACM* serial devices into the sandbox
@@ -303,6 +309,12 @@ if [ "$DRY_RUN" != true ]; then
   # pi config, auth and sessions (~/.pi/agent), persisted like ~/.claude.
   mkdir -p "$HOME/.pi/agent"
   chmod 700 "$HOME/.pi"
+  # Azure CLI login state (token cache, profile), so `az login` survives
+  # restarts even when az only comes from a nix develop shell.
+  if [ "$MOUNT_AZURE" = true ]; then
+    mkdir -p "$HOME/.azure"
+    chmod 700 "$HOME/.azure"
+  fi
 fi
 
 # Claude Code resolves its config dir from CLAUDE_CONFIG_DIR, falling back to
@@ -887,6 +899,10 @@ CLEANUP_FILES+=("$SESSION_INFO_TMP")
   if [ "$GIT_CREDS" = true ]; then
     printf -- '- Git HTTPS: credentials for %s are proxied from the host helper (no keyring/D-Bus in here)\n' "${AGENTBOX_GIT_CRED_HOSTS:-dev.azure.com *.visualstudio.com}"
   fi
+  if [ "$MOUNT_AZURE" = true ]; then
+    # shellcheck disable=SC2016 # literal Markdown backticks
+    printf -- '- Azure CLI: `~/.azure` is persisted on the host, so `az login` survives restarts\n'
+  fi
   if [ "$OPEN_URL" = true ]; then
     # shellcheck disable=SC2016 # literal Markdown backticks
     printf -- '- Browser: `xdg-open`/`$BROWSER` open http(s) URLs in the host browser (e.g. for MCP OAuth logins)\n'
@@ -1022,6 +1038,11 @@ if [ -n "$OPENCODE_JSONC" ] && [ -f "$OPENCODE_JSONC" ]; then
   RO_BINDS+=(--ro-bind-try "$jsonc_current" "$OPENCODE_CFG/opencode.jsonc")
 fi
 
+AZURE_BINDS=()
+if [ "$MOUNT_AZURE" = true ]; then
+  AZURE_BINDS=(--bind-try "$HOME/.azure" "$HOME/.azure")
+fi
+
 SSH_BINDS=()
 if [ "$MOUNT_SSH" = true ] && [ -d "$HOME/.ssh" ]; then
   SSH_TMPDIR=$(mktemp -d)
@@ -1130,6 +1151,7 @@ BWRAP_ARGS=(
   --bind-try "$HOME/.codex" "$HOME/.codex"
   --bind-try "$HOME/.multica" "$HOME/.multica"
   --bind-try "$HOME/.pi" "$HOME/.pi"
+  "${AZURE_BINDS[@]}"
   --bind-try "$HOME/.config/anthropic" "$HOME/.config/anthropic"
   --tmpfs "$HOME/.config/tuicr"
   --ro-bind-try "${TUICR_CONFIG:-$SCRIPT_DIR/default/tuicr/config.toml}" "$HOME/.config/tuicr/config.toml"

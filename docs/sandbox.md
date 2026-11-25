@@ -34,6 +34,7 @@ Defined in `sandbox.sh`:
 | `--version` | Print the agentbox version (git revision of the flake) and exit |
 | `--no-ssh-keys` | Do not mount `~/.ssh` in the sandbox (mounted read-only by default) |
 | `--hide-secrets` | Hide `secrets`/`secret` directories in workspaces (they are visible by default) |
+| `--no-azure` | Do not persist the Azure CLI login: `~/.azure` is otherwise mounted read-write from the host |
 | `--no-git-creds` | Do not proxy git HTTPS credentials from the host (see [Git HTTPS credentials](#git-https-credentials)) |
 | `--no-open-url` | Do not forward `xdg-open`/`$BROWSER` URLs to the host browser (see [Opening URLs in the host browser](#opening-urls-in-the-host-browser)) |
 | `--no-net` | Disable network access in the sandbox |
@@ -78,6 +79,7 @@ All account dirs are bound read-write in every session, so a session can read th
 - If arguments are provided, they are passed directly as the sandbox command instead
 - Network binds (`resolv.conf`, `hosts`, `nsswitch.conf`) are conditional on `--no-net`; the Docker socket is only bound with `--docker`
 - Wayland socket is auto-detected and mounted for GUI clipboard support
+- Azure CLI state persists in the host `~/.azure` directory (created with mode `700` if missing), mounted read-write: the `az login` token cache and profile survive restarts, also when `az` only comes from a `nix develop` flake. The token cache gives the agent your Azure access; pass `--no-azure` to leave it out
 - SSH keys are mounted read-only by default (a hardened temp copy); pass `--no-ssh-keys` to leave `~/.ssh` out of the sandbox
 - Skills and commands are mounted as read-only bind mounts under `~/.config/opencode/skills/` and `~/.config/opencode/commands/`, plus per-feature overlays for enabled `--with-*` flags
 - `--hide-secrets` shadows `secrets`/`secret` directories in all workspaces, including `-r` read-only ones
@@ -150,7 +152,7 @@ The sandbox mounts:
 - Podman (only with `--with-podman`): `/etc/containers` (read-only), `~/.local/share/agentbox/containers/storage` (read-write); `/etc/subuid` and `/etc/subgid` are replaced with empty files
 - TLS/SSL: `/etc/ssl`, `/etc/pki`, `/etc/ca-certificates`, `/etc/nix`, `/etc/static`
 - Timezone: `/etc/localtime`, `/etc/zoneinfo`, `/etc/timezone`
-- User config: `~/.config/opencode` (per-sandbox writable copy of the host directory; changes are discarded on exit), `~/.config/tuicr` (tmpfs), `~/.config/git`, `~/.config/nix`, `~/.claude`, `~/.claude-*` and `~/.claude-shared` (read-write; the selected account is exported as `CLAUDE_CONFIG_DIR`), `~/.codex` (read-write), `~/.multica` (read-write), `~/.config/anthropic`
+- User config: `~/.config/opencode` (per-sandbox writable copy of the host directory; changes are discarded on exit), `~/.config/tuicr` (tmpfs), `~/.config/git`, `~/.config/nix`, `~/.claude`, `~/.claude-*` and `~/.claude-shared` (read-write; the selected account is exported as `CLAUDE_CONFIG_DIR`), `~/.codex` (read-write), `~/.multica` (read-write), `~/.azure` (read-write, unless `--no-azure`), `~/.config/anthropic`
 - User data: `~/.cache/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode`
 - Herdr: isolated temp config and state directories
 

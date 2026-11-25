@@ -51,3 +51,13 @@ underscores, e.g. `--with-foo-bar` → `FOO_BAR_DIR`).
    (dir creation, extra binds, ...), add it to the feature setup loop
    (`# Feature setup (per --with-<name> flags)`). No flag parsing change is needed.
 4. Document the feature in `docs/` (see `docs/sandbox.md`).
+
+# Git commits
+
+Always commit as a generic author, never the host user's identity:
+
+```
+git -c user.name="agentbox" -c user.email="agentbox@localhost" commit ...
+```
+
+Do not change the git config and do not put personal names or email addresses in commit messages.
