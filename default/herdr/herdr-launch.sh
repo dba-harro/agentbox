@@ -25,8 +25,24 @@ if [ "${AGENTBOX_AGENT:-opencode2}" = claude ]; then
         esac
         accounts+=("$n")
       done
-      account=$(printf '%s\n' "${accounts[@]}" \
-        | fzf --prompt='Claude account > ' --height=~10 --reverse) || account=personal
+      # Show who each account is logged in as, so a pre-selected "personal"
+      # that is already logged in is not mistaken for a fresh/other account.
+      lines=()
+      for n in "${accounts[@]}"; do
+        if [ "$n" = personal ]; then d="$HOME/.claude"; else d="$HOME/.claude-$n"; fi
+        who=
+        if [ -s "$d/.credentials.json" ]; then
+          who=$(jq -r '.oauthAccount.emailAddress // empty' "$d/.claude.json" 2>/dev/null || true)
+          who="${who:-logged in}"
+        else
+          who="not logged in"
+        fi
+        lines+=("$(printf '%-12s %s' "$n" "$who")")
+      done
+      choice=$(printf '%s\n' "${lines[@]}" \
+        | fzf --prompt='Claude account > ' --height=~10 --reverse \
+              --header='Enter = highlighted account (Esc falls back to personal)') || choice=personal
+      account="${choice%% *}"
     fi
   fi
   if [ "$account" = personal ]; then

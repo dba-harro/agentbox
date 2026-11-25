@@ -52,6 +52,8 @@ With `--agent claude`, an fzf picker in the Herdr launcher chooses the account b
 | `personal` | `~/.claude` (the existing dir, stays logged in) |
 | `work`, `NAME` | `~/.claude-work`, `~/.claude-NAME` |
 
+Inside the sandbox, `claude-personal`, `claude-work` and `claude-NAME` (one per existing `~/.claude-NAME`) start Claude Code directly with that account, in any pane or tab, regardless of the picker choice. They live in `/run/agentbox/bin` (always on `PATH`) and are all `default/claude/claude-account.sh`, which derives the account from its own name. The picker lists each account with the email it is logged in as (or `not logged in`).
+
 `~/.claude-shared` holds what every account shares. On each start `sandbox.sh` creates it (with `skills/ commands/ agents/ plugins/ CLAUDE.md settings.json`) and symlinks those items into every account dir. Existing real content in an account is first merged into the shared dir without overwriting and the original kept as `<item>.bak.<timestamp>`. Because Claude rewrites files via temp+rename, a regular file that replaced a symlink is folded back into the shared copy at the next start. Credentials, `.claude.json` and session history stay per account.
 
 MCP servers: `~/.claude-shared/mcp.json` (`{"mcpServers": {...}}`, seeded once from the personal account) is merged into each account's `.claude.json` on start; shared entries win on name clashes. Servers added with `claude mcp add` stay local to that account unless also put in `mcp.json`.

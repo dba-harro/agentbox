@@ -843,10 +843,26 @@ if [ "$OPEN_URL" = true ] && [ "${#NET_ARGS[@]}" -gt 0 ] &&
     --ro-bind "$HOST_PROXY_TMPDIR/client.sh" "$HOST_PROXY_SANDBOX_DIR/bin/xdg-open"
     --setenv AGENTBOX_OPEN_URL_SOCK "$HOST_PROXY_SANDBOX_DIR/open-url.sock"
     --setenv BROWSER "$HOST_PROXY_SANDBOX_DIR/bin/xdg-open"
-    --setenv PATH "$HOST_PROXY_SANDBOX_DIR/bin:$PATH"
   )
 else
   OPEN_URL=false
+fi
+
+# Per-account launchers inside the sandbox: claude-personal, claude-work and
+# claude-NAME for every other account dir, all the same script that picks the
+# account from its own name. PATH gets /run/agentbox/bin unconditionally (the
+# open-url proxy's xdg-open lives there too).
+CLAUDE_ACCOUNT_BIN_ARGS=()
+_claude_launcher="${CLAUDE_ACCOUNT_LAUNCHER:-$SCRIPT_DIR/default/claude/claude-account.sh}"
+if [ -f "$_claude_launcher" ]; then
+  _claude_names=(personal)
+  for _d in "${CLAUDE_ACCOUNT_DIRS[@]}"; do
+    [ "$_d" = "$HOME/.claude" ] && continue
+    _claude_names+=("${_d##*/.claude-}")
+  done
+  for _n in "${_claude_names[@]}"; do
+    CLAUDE_ACCOUNT_BIN_ARGS+=(--ro-bind "$_claude_launcher" "$HOST_PROXY_SANDBOX_DIR/bin/claude-$_n")
+  done
 fi
 
 # Per-session sandbox details, appended after the static sandbox prompt so the
@@ -1126,6 +1142,8 @@ BWRAP_ARGS=(
   "${SSH_BINDS[@]}"
   "${GIT_CRED_ARGS[@]}"
   "${OPEN_URL_ARGS[@]}"
+  "${CLAUDE_ACCOUNT_BIN_ARGS[@]}"
+  --setenv PATH "$HOST_PROXY_SANDBOX_DIR/bin:$PATH"
   "${PODMAN_ARGS[@]}"
   "${RO_BINDS[@]}"
   "${SECRETS_SHADOW[@]}"

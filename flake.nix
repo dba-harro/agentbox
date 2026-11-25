@@ -147,6 +147,7 @@
             export HERDR_LAUNCHER="${./default/herdr/herdr-launch.sh}"
             export HERDR_AGENT_TAB="${./default/herdr/agent-tab.sh}"
             export CLAUDE_STATUSLINE="${./default/claude/statusline.sh}"
+            export CLAUDE_ACCOUNT_LAUNCHER="${./default/claude/claude-account.sh}"
             export TUICR_CONFIG="${./default/tuicr/config.toml}"
             export MERGE_SCRIPT="${./merge-jsonc.js}"
             export AGENTBOX_VERSION="${self.shortRev or self.dirtyShortRev or "unknown"}"
