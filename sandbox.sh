@@ -335,10 +335,11 @@ fi
 # Multiple Claude Code accounts. 'personal' is the existing ~/.claude, every
 # other account lives in ~/.claude-NAME ('work' always exists). Skills,
 # commands, agents, plugins, CLAUDE.md and settings.json are shared through
-# symlinks into ~/.claude-shared; credentials, .claude.json and session
-# history stay per account.
+# symlinks into ~/.claude-shared, as are projects/ (session transcripts, so
+# /resume lists every session regardless of account) and file-history/ (/rewind
+# snapshots, keyed by session id). Credentials and .claude.json stay per account.
 CLAUDE_SHARED_DIR="$HOME/.claude-shared"
-CLAUDE_SHARED_ITEMS=(skills commands agents plugins CLAUDE.md settings.json)
+CLAUDE_SHARED_ITEMS=(skills commands agents plugins projects file-history CLAUDE.md settings.json)
 if [ -n "$CLAUDE_ACCOUNT" ] && [ "$CLAUDE_ACCOUNT" != personal ]; then
   CLAUDE_CFG_DIR="$HOME/.claude-$CLAUDE_ACCOUNT"
 fi
