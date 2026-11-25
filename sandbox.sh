@@ -344,7 +344,9 @@ if [ -n "$CLAUDE_ACCOUNT" ] && [ "$CLAUDE_ACCOUNT" != personal ]; then
   CLAUDE_CFG_DIR="$HOME/.claude-$CLAUDE_ACCOUNT"
 fi
 if [ "$DRY_RUN" != true ]; then
-  mkdir -p "$HOME/.claude-work" "$CLAUDE_CFG_DIR"
+  # The shared dir must exist before the --bind-try list below is built, or
+  # the first run leaves the symlinks into it dangling (transcript ENOENT).
+  mkdir -p "$HOME/.claude-work" "$CLAUDE_SHARED_DIR" "$CLAUDE_CFG_DIR"
 fi
 
 # Every existing account dir (personal first), then the shared dir.
